@@ -6,3 +6,4 @@ detect-delimiter
 numpy
 scikit-learn
 plotly
+openpyxl
