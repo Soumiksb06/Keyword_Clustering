@@ -176,9 +176,9 @@ if uploaded_file:
                 height=700,
                 title='Keyword Clusters in 3D Space',
                 scene=dict(
-                    xaxis_title='X Axis Title',
-                    yaxis_title='Y Axis Title',
-                    zaxis_title='Z Axis Title'
+                    xaxis_title='X Axis',
+                    yaxis_title='Y Axis',
+                    zaxis_title='Z Axis'
                 ),
                 margin=dict(l=0, r=0, b=0, t=0)
             )
