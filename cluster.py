@@ -110,7 +110,7 @@ if uploaded_file:
             df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
             df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
 
-            df['Cluster Name'] = df['Cluster Name'].fillna("zzz_no_cluster")
+            df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
             del df['Length']
 
