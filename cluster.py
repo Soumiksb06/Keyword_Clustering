@@ -4,6 +4,7 @@ from sentence_transformers import SentenceTransformer, util
 import chardet
 from detect_delimiter import detect
 import numpy as np
+from sklearn.manifold import TSNE
 import plotly.graph_objects as go
 import colorsys
 
@@ -101,69 +102,50 @@ if uploaded_file:
                     break
 
             df_new = pd.concat(df_all)
+            df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-            # Creating a new dataframe with 'Cluster' and 'Keywords' columns
-            df_grouped = df_new.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
-            df_grouped.columns = ['Cluster', 'Keywords']
+            df['Length'] = df['Keyword'].astype(str).map(len)
+            df = df.sort_values(by="Length", ascending=True)
 
-            # Save to CSV
-            csv_data_grouped = df_grouped.to_csv(index=False)
+            df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+            df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+
+            df['Cluster Name'] = df['Cluster Name'].fillna("zzz_no_cluster")
+
+            del df['Length']
+
+            col = df.pop("Keyword")
+            df.insert(0, col.name, col)
+
+            col = df.pop('Cluster Name')
+            df.insert(0, col.name, col)
+
+            df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
+
+            uncluster_percent = (remaining / len(df)) * 100
+            clustered_percent = 100 - uncluster_percent
+            st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
+            st.write(f"Number of iterations: {iterations}")
+            st.write(f"Total unclustered keywords: {remaining}")
+
+            # Print number of clusters
+            st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+
+            # Save results with only 'Cluster' and 'Keywords' columns
+            result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+            result_df.columns = ['Cluster', 'Keywords']
+
+            # Display result dataframe
+            st.write(result_df)
+
+            # Download button for clustered keywords
+            csv_data_clustered = result_df.to_csv(index=False)
             st.download_button(
                 label="Download Clustered Keywords",
-                data=csv_data_grouped,
-                file_name="Grouped_Clustered_Keywords.csv",
+                data=csv_data_clustered,
+                file_name="Clustered_Keywords.csv",
                 mime="text/csv"
             )
-
-            st.write(f"Number of clusters: {len(df_grouped)}")
-
-            # Generate 3D plot of clusters
-            # Assuming you have numerical embeddings or features for each keyword
-            # For demonstration, let's create random data
-            np.random.seed(42)
-            num_keywords = len(df_new)
-            embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
-
-            # Generate colors for clusters
-            unique_clusters = df_new['Cluster Name'].unique()
-            num_clusters = len(unique_clusters)
-            cluster_colors = generate_colors(max(num_clusters, 100))
-
-            # Create a figure for the 3D scatter plot
-            fig_3d = go.Figure()
-
-            for i, cluster in enumerate(unique_clusters):
-                cluster_data = df_new[df_new['Cluster Name'] == cluster]
-                fig_3d.add_trace(go.Scatter3d(
-                    x=embeddings_3d[cluster_data.index, 0],
-                    y=embeddings_3d[cluster_data.index, 1],
-                    z=embeddings_3d[cluster_data.index, 2],
-                    mode='markers',
-                    marker=dict(
-                        size=8,
-                        color=f'rgb{cluster_colors[i]}',
-                        opacity=0.8,
-                    ),
-                    text=cluster_data['Keyword'],  # Display keyword names on hover
-                    hoverinfo='text',  # Show only text (keyword names) on hover
-                    name=cluster
-                ))
-
-            # Update layout for 3D scatter plot
-            fig_3d.update_layout(
-                width=800,
-                height=700,
-                title='Keyword Clusters in 3D Space',
-                scene=dict(
-                    xaxis_title='X Axis Title',
-                    yaxis_title='Y Axis Title',
-                    zaxis_title='Z Axis Title'
-                ),
-                margin=dict(l=0, r=0, b=0, t=0)
-            )
-
-            # Display 3D scatter plot using Streamlit
-            st.plotly_chart(fig_3d, use_container_width=True)
 
             # Display unclustered keywords and add download button
             if remaining > 0:
