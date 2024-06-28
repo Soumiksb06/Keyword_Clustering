@@ -4,7 +4,6 @@ from sentence_transformers import SentenceTransformer, util
 import chardet
 from detect_delimiter import detect
 import numpy as np
-from sklearn.manifold import TSNE
 import plotly.graph_objects as go
 import colorsys
 
@@ -117,6 +116,54 @@ if uploaded_file:
             )
 
             st.write(f"Number of clusters: {len(df_grouped)}")
+
+            # Generate 3D plot of clusters
+            # Assuming you have numerical embeddings or features for each keyword
+            # For demonstration, let's create random data
+            np.random.seed(42)
+            num_keywords = len(df_new)
+            embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
+
+            # Generate colors for clusters
+            unique_clusters = df_new['Cluster Name'].unique()
+            num_clusters = len(unique_clusters)
+            cluster_colors = generate_colors(max(num_clusters, 100))
+
+            # Create a figure for the 3D scatter plot
+            fig_3d = go.Figure()
+
+            for i, cluster in enumerate(unique_clusters):
+                cluster_data = df_new[df_new['Cluster Name'] == cluster]
+                fig_3d.add_trace(go.Scatter3d(
+                    x=embeddings_3d[cluster_data.index, 0],
+                    y=embeddings_3d[cluster_data.index, 1],
+                    z=embeddings_3d[cluster_data.index, 2],
+                    mode='markers',
+                    marker=dict(
+                        size=8,
+                        color=f'rgb{cluster_colors[i]}',
+                        opacity=0.8,
+                    ),
+                    text=cluster_data['Keyword'],  # Display keyword names on hover
+                    hoverinfo='text',  # Show only text (keyword names) on hover
+                    name=cluster
+                ))
+
+            # Update layout for 3D scatter plot
+            fig_3d.update_layout(
+                width=800,
+                height=700,
+                title='Keyword Clusters in 3D Space',
+                scene=dict(
+                    xaxis_title='X Axis Title',
+                    yaxis_title='Y Axis Title',
+                    zaxis_title='Z Axis Title'
+                ),
+                margin=dict(l=0, r=0, b=0, t=0)
+            )
+
+            # Display 3D scatter plot using Streamlit
+            st.plotly_chart(fig_3d, use_container_width=True)
 
             # Display unclustered keywords and add download button
             if remaining > 0:
