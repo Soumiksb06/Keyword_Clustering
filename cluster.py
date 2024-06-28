@@ -86,10 +86,10 @@ if uploaded_file:
                 for keyword, cluster in enumerate(clusters):
                     for sentence_id in cluster:
                         corpus_sentences_list.append(corpus_sentences[sentence_id])
-                        cluster_name_list.append(f"Cluster {keyword + 1}")
+                        cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
 
                 df_new = pd.DataFrame(None)
-                df_new['Cluster'] = cluster_name_list
+                df_new['Cluster Name'] = cluster_name_list
                 df_new["Keyword"] = corpus_sentences_list
 
                 df_all.append(df_new)
@@ -103,68 +103,20 @@ if uploaded_file:
 
             df_new = pd.concat(df_all)
 
-            # Create a new DataFrame with 'Cluster' and 'Keywords'
-            df_clustered = df_new.groupby('Cluster')['Keyword'].apply(lambda x: ', '.join(x)).reset_index()
-            df_clustered.columns = ['Cluster', 'Keywords']
+            # Creating a new dataframe with 'Cluster' and 'Keywords' columns
+            df_grouped = df_new.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+            df_grouped.columns = ['Cluster', 'Keywords']
 
-            st.write(df_clustered)
-
-            # Generate 3D plot of clusters
-            # Assuming you have numerical embeddings or features for each keyword
-            # For demonstration, let's create random data
-            np.random.seed(42)
-            num_keywords = len(df_new['Keyword'])
-            embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
-
-            # Generate colors for clusters
-            unique_clusters = df_new['Cluster'].unique()
-            num_clusters = len(unique_clusters)
-            cluster_colors = generate_colors(max(num_clusters, 100))
-
-            # Create a figure for the 3D scatter plot
-            fig_3d = go.Figure()
-
-            for i, cluster in enumerate(unique_clusters):
-                cluster_data = df_new[df_new['Cluster'] == cluster]
-                fig_3d.add_trace(go.Scatter3d(
-                    x=embeddings_3d[cluster_data.index, 0],
-                    y=embeddings_3d[cluster_data.index, 1],
-                    z=embeddings_3d[cluster_data.index, 2],
-                    mode='markers',
-                    marker=dict(
-                        size=8,
-                        color=f'rgb{cluster_colors[i]}',
-                        opacity=0.8,
-                    ),
-                    text=cluster_data['Keyword'],  # Display keyword names on hover
-                    hoverinfo='text',  # Show only text (keyword names) on hover
-                    name=cluster
-                ))
-
-            # Update layout for 3D scatter plot
-            fig_3d.update_layout(
-                width=800,
-                height=700,
-                title='Keyword Clusters in 3D Space',
-                scene=dict(
-                    xaxis_title='X Axis Title',
-                    yaxis_title='Y Axis Title',
-                    zaxis_title='Z Axis Title'
-                ),
-                margin=dict(l=0, r=0, b=0, t=0)
-            )
-
-            # Display 3D scatter plot using Streamlit
-            st.plotly_chart(fig_3d, use_container_width=True)
-
-            # Download button for clustered keywords
-            csv_data_clustered = df_clustered.to_csv(index=False)
+            # Save to CSV
+            csv_data_grouped = df_grouped.to_csv(index=False)
             st.download_button(
                 label="Download Clustered Keywords",
-                data=csv_data_clustered,
-                file_name="Clustered_Keywords.csv",
+                data=csv_data_grouped,
+                file_name="Grouped_Clustered_Keywords.csv",
                 mime="text/csv"
             )
+
+            st.write(f"Number of clusters: {len(df_grouped)}")
 
             # Display unclustered keywords and add download button
             if remaining > 0:
