@@ -86,10 +86,10 @@ if uploaded_file:
                 for keyword, cluster in enumerate(clusters):
                     for sentence_id in cluster:
                         corpus_sentences_list.append(corpus_sentences[sentence_id])
-                        cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
+                        cluster_name_list.append(f"Cluster {keyword + 1}")
 
                 df_new = pd.DataFrame(None)
-                df_new['Cluster Name'] = cluster_name_list
+                df_new['Cluster'] = cluster_name_list
                 df_new["Keyword"] = corpus_sentences_list
 
                 df_all.append(df_new)
@@ -102,44 +102,22 @@ if uploaded_file:
                     break
 
             df_new = pd.concat(df_all)
-            df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-            df['Length'] = df['Keyword'].astype(str).map(len)
-            df = df.sort_values(by="Length", ascending=True)
+            # Create a new DataFrame with 'Cluster' and 'Keywords'
+            df_clustered = df_new.groupby('Cluster')['Keyword'].apply(lambda x: ', '.join(x)).reset_index()
+            df_clustered.columns = ['Cluster', 'Keywords']
 
-            df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
-            df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
-
-            df['Cluster Name'] = df['Cluster Name'].fillna("zzz_no_cluster")
-
-            del df['Length']
-
-            col = df.pop("Keyword")
-            df.insert(0, col.name, col)
-
-            col = df.pop('Cluster Name')
-            df.insert(0, col.name, col)
-
-            df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
-
-            uncluster_percent = (remaining / len(df)) * 100
-            clustered_percent = 100 - uncluster_percent
-            st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
-            st.write(f"Number of iterations: {iterations}")
-            st.write(f"Total unclustered keywords: {remaining}")
-
-            # Print number of clusters
-            st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+            st.write(df_clustered)
 
             # Generate 3D plot of clusters
             # Assuming you have numerical embeddings or features for each keyword
             # For demonstration, let's create random data
             np.random.seed(42)
-            num_keywords = len(df['Keyword'])
+            num_keywords = len(df_new['Keyword'])
             embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
 
             # Generate colors for clusters
-            unique_clusters = df['Cluster Name'].unique()
+            unique_clusters = df_new['Cluster'].unique()
             num_clusters = len(unique_clusters)
             cluster_colors = generate_colors(max(num_clusters, 100))
 
@@ -147,7 +125,7 @@ if uploaded_file:
             fig_3d = go.Figure()
 
             for i, cluster in enumerate(unique_clusters):
-                cluster_data = df[df['Cluster Name'] == cluster]
+                cluster_data = df_new[df_new['Cluster'] == cluster]
                 fig_3d.add_trace(go.Scatter3d(
                     x=embeddings_3d[cluster_data.index, 0],
                     y=embeddings_3d[cluster_data.index, 1],
@@ -180,7 +158,7 @@ if uploaded_file:
             st.plotly_chart(fig_3d, use_container_width=True)
 
             # Download button for clustered keywords
-            csv_data_clustered = df.to_csv(index=False)
+            csv_data_clustered = df_clustered.to_csv(index=False)
             st.download_button(
                 label="Download Clustered Keywords",
                 data=csv_data_clustered,
