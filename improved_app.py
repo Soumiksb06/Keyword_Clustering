@@ -45,10 +45,26 @@ clustering_method = st.sidebar.selectbox(
     ["Community Detection", "Agglomerative", "K-means"]
 )
 
-cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
-min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
+# Conditional inputs based on clustering method
+if clustering_method == "Community Detection":
+    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+    cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
+elif clustering_method == "Agglomerative":
+    max_clusters = len(corpus_sentences) // 4
+    while True:
+        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
+        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+        n_clusters = len(np.unique(cluster_labels))
+        if n_clusters <= max_clusters:
+            break
+        distance_threshold += 0.1
+    st.write(f"Adjusted distance threshold: {distance_threshold:.2f}")
+    st.write(f"Number of clusters formed: {n_clusters}")
+elif clustering_method == "K-means":
+    clustering_model = KMeans(n_clusters=n_clusters)
+    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
+transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
 # Add number of clusters selection for K-means
 if clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
