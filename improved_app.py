@@ -8,7 +8,6 @@ from sklearn.manifold import TSNE
 import plotly.graph_objects as go
 import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
-import hdbscan
 
 # Function to generate distinct colors in RGB format
 def generate_colors(num_colors):
@@ -34,13 +33,6 @@ def perform_agglomerative_clustering(df, num_clusters):
 def perform_kmeans_clustering(df, num_clusters):
     embeddings = np.random.randn(len(df), 3)  # Replace with actual embeddings
     clustering = KMeans(n_clusters=num_clusters)
-    df['Cluster Name'] = clustering.fit_predict(embeddings)
-    return df
-
-# Function to perform HDBSCAN Clustering
-def perform_hdbscan_clustering(df):
-    embeddings = np.random.randn(len(df), 3)  # Replace with actual embeddings
-    clustering = hdbscan.HDBSCAN(min_cluster_size=5)
     df['Cluster Name'] = clustering.fit_predict(embeddings)
     return df
 
