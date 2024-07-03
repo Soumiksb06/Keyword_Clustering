@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import torch
+from sklearn.decomposition import PCA
 
 def generate_colors(num_colors):
     colors = []
@@ -204,15 +205,28 @@ if uploaded_file:
 
                 st.write(result_df)
 
-                # Generate 3D embeddings for visualization
-                embeddings_3d = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
+                # Generate embeddings for visualization
+                embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
+
+                # Reduce to 3D using PCA if necessary
+                if embeddings.shape[1] > 3:
+                    pca = PCA(n_components=3)
+                    embeddings_3d = pca.fit_transform(embeddings)
+                elif embeddings.shape[1] < 3:
+                    st.error("Error: Embeddings have fewer than 3 dimensions. Please choose a different model.")
+                    st.stop()
+                else:
+                    embeddings_3d = embeddings
 
                 # Normalize the embeddings to [0, 1] range for coloring
                 embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
 
                 # Create a color scale based on the normalized embeddings
-                colors = ['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255)) 
-                          for r, g, b in embeddings_normalized]
+                colors = ['rgb({},{},{})'.format(
+                    int(r*255), 
+                    int(g*255), 
+                    int(b*255)
+                ) for r, g, b in embeddings_normalized]
 
                 # Create the 3D scatter plot
                 fig_3d = go.Figure(data=[go.Scatter3d(
