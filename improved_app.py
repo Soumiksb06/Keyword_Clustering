@@ -49,6 +49,11 @@ clustering_method = st.sidebar.selectbox(
 cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
 min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
 transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
+
+# Add number of clusters selection for K-means
+if clustering_method == "K-means":
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
+
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
 if uploaded_file:
@@ -101,7 +106,14 @@ if uploaded_file:
                 corpus_sentences = list(corpus_set)
                 check_len = len(corpus_sentences)
 
+                if len(corpus_sentences) == 0:
+                    break
+
                 corpus_embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
+                
+                # Ensure corpus_embeddings is 2D
+                if len(corpus_embeddings.shape) == 1:
+                    corpus_embeddings = corpus_embeddings.reshape(1, -1)
                 
                 if clustering_method == "Community Detection":
                     clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
@@ -110,7 +122,6 @@ if uploaded_file:
                     clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=1-cluster_accuracy)
                     cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
                 elif clustering_method == "K-means":
-                    n_clusters = max(int(len(corpus_sentences) / min_cluster_size), 2)
                     clustering_model = KMeans(n_clusters=n_clusters)
                     cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
@@ -137,131 +148,141 @@ if uploaded_file:
                 if check_len == remaining:
                     break
 
-            df_new = pd.concat(df_all)
-            df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
+            if len(df_all) == 0:
+                st.error("No clusters were formed. Please check your data or adjust the clustering parameters.")
+            else:
+                df_new = pd.concat(df_all)
+                df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-            df['Length'] = df['Keyword'].astype(str).map(len)
-            df = df.sort_values(by="Length", ascending=True)
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
 
-            df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
-            df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
 
-            df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
+                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
-            del df['Length']
+                del df['Length']
 
-            col = df.pop("Keyword")
-            df.insert(0, col.name, col)
+                col = df.pop("Keyword")
+                df.insert(0, col.name, col)
 
-            col = df.pop('Cluster Name')
-            df.insert(0, col.name, col)
+                col = df.pop('Cluster Name')
+                df.insert(0, col.name, col)
 
-            df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
+                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
-            uncluster_percent = (remaining / len(df)) * 100
-            clustered_percent = 100 - uncluster_percent
-            st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
-            st.write(f"Number of iterations: {iterations}")
-            st.write(f"Total unclustered keywords: {remaining}")
+                uncluster_percent = (remaining / len(df)) * 100
+                clustered_percent = 100 - uncluster_percent
+                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
+                st.write(f"Number of iterations: {iterations}")
+                st.write(f"Total unclustered keywords: {remaining}")
 
-            # Print number of clusters
-            st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+                # Print number of clusters
+                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
 
-            # Calculate cluster coherences
-            cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
-            overall_coherence = np.mean(cluster_coherences)
+                # Calculate cluster coherences
+                if len(corpus_embeddings) > 1:
+                    cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+                    overall_coherence = np.mean(cluster_coherences)
 
-            st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
-            st.write("Cluster Coherences:")
-            for i, coherence in enumerate(cluster_coherences):
-                st.write(f"Cluster {i+1}: {coherence:.4f}")
+                    st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                    st.write("Cluster Coherences:")
+                    for i, coherence in enumerate(cluster_coherences):
+                        st.write(f"Cluster {i+1}: {coherence:.4f}")
 
-            # Calculate silhouette score
-            silhouette_avg = silhouette_score(corpus_embeddings.cpu().numpy(), cluster_labels)
-            st.write(f"Silhouette Score: {silhouette_avg:.4f}")
+                    # Calculate silhouette score
+                    if len(np.unique(cluster_labels)) > 1:
+                        silhouette_avg = silhouette_score(corpus_embeddings.cpu().numpy(), cluster_labels)
+                        st.write(f"Silhouette Score: {silhouette_avg:.4f}")
+                    else:
+                        st.write("Silhouette Score: Not applicable (only one cluster formed)")
+                else:
+                    st.write("Coherence and Silhouette Score: Not applicable (insufficient data)")
 
-            # Save results with only 'Cluster' and 'Keywords' columns
-            result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
-            result_df.columns = ['Cluster', 'Keywords']
+                # Save results with only 'Cluster' and 'Keywords' columns
+                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+                result_df.columns = ['Cluster', 'Keywords']
 
-            # Display result dataframe
-            st.write(result_df)
+                # Display result dataframe
+                st.write(result_df)
 
-            # Generate 3D plot of clusters
-            # Assuming you have numerical embeddings or features for each keyword
-            # For demonstration, let's create random data
-            np.random.seed(42)
-            num_keywords = len(df['Keyword'])
-            embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
+                # Generate 3D plot of clusters
+                # Assuming you have numerical embeddings or features for each keyword
+                # For demonstration, let's create random data
+                np.random.seed(42)
+                num_keywords = len(df['Keyword'])
+                embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
 
-            # Generate colors for clusters
-            unique_clusters = df['Cluster Name'].unique()
-            num_clusters = len(unique_clusters)
-            cluster_colors = generate_colors(max(num_clusters, 100))
+                # Generate colors for clusters
+                unique_clusters = df['Cluster Name'].unique()
+                num_clusters = len(unique_clusters)
+                cluster_colors = generate_colors(max(num_clusters, 100))
 
-            # Create a figure for the 3D scatter plot
-            fig_3d = go.Figure()
+                # Create a figure for the 3D scatter plot
+                fig_3d = go.Figure()
 
-            for i, cluster in enumerate(unique_clusters):
-                cluster_data = df[df['Cluster Name'] == cluster]
-                fig_3d.add_trace(go.Scatter3d(
-                    x=embeddings_3d[cluster_data.index, 0],
-                    y=embeddings_3d[cluster_data.index, 1],
-                    z=embeddings_3d[cluster_data.index, 2],
-                    mode='markers',
-                    marker=dict(
-                        size=8,
-                        color=f'rgb{cluster_colors[i]}',
-                        opacity=0.8,
+                for i, cluster in enumerate(unique_clusters):
+                    cluster_data = df[df['Cluster Name'] == cluster]
+                    fig_3d.add_trace(go.Scatter3d(
+                        x=embeddings_3d[cluster_data.index, 0],
+                        y=embeddings_3d[cluster_data.index, 1],
+                        z=embeddings_3d[cluster_data.index, 2],
+                        mode='markers',
+                        marker=dict(
+                            size=8,
+                            color=f'rgb{cluster_colors[i]}',
+                            opacity=0.8,
+                        ),
+                        text=cluster_data['Keyword'],  # Display keyword names on hover
+                        hoverinfo='text',  # Show only text (keyword names) on hover
+                        name=cluster
+                    ))
+
+                # Update layout for 3D scatter plot
+                fig_3d.update_layout(
+                    width=800,
+                    height=700,
+                    title='Keyword Clusters in 3D Space',
+                    scene=dict(
+                        xaxis_title='X Axis',
+                        yaxis_title='Y Axis',
+                        zaxis_title='Z Axis'
                     ),
-                    text=cluster_data['Keyword'],  # Display keyword names on hover
-                    hoverinfo='text',  # Show only text (keyword names) on hover
-                    name=cluster
-                ))
+                    margin=dict(l=0, r=0, b=0, t=0)
+                )
 
-            # Update layout for 3D scatter plot
-            fig_3d.update_layout(
-                width=800,
-                height=700,
-                title='Keyword Clusters in 3D Space',
-                scene=dict(
-                    xaxis_title='X Axis',
-                    yaxis_title='Y Axis',
-                    zaxis_title='Z Axis'
-                ),
-                margin=dict(l=0, r=0, b=0, t=0)
-            )
+                # Display 3D scatter plot using Streamlit
+                st.plotly_chart(fig_3d, use_container_width=True)
 
-            # Display 3D scatter plot using Streamlit
-            st.plotly_chart(fig_3d, use_container_width=True)
-
-            # Download button for clustered keywords
-            csv_data_clustered = result_df.to_csv(index=False)
-            st.download_button(
-                label="Download Clustered Keywords",
-                data=csv_data_clustered,
-                file_name="Clustered_Keywords.csv",
-                mime="text/csv"
-            )
-
-            # Display unclustered keywords and add download button
-            if remaining > 0:
-                st.write("Unclustered Keywords:")
-                st.write(list(corpus_set))
-                
-                # Create a DataFrame of unclustered keywords
-                unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
-                
-                # Download button for unclustered keywords
-                csv_data_unclustered = unclustered_df.to_csv(index=False)
+                # Download button for clustered keywords
+                csv_data_clustered = result_df.to_csv(index=False)
                 st.download_button(
-                    label="Download Unclustered Keywords",
-                    data=csv_data_unclustered,
-                    file_name="Unclustered_Keywords.csv",
+                    label="Download Clustered Keywords",
+                    data=csv_data_clustered,
+                    file_name="Clustered_Keywords.csv",
                     mime="text/csv"
                 )
+
+                # Display unclustered keywords and add download button
+                if remaining > 0:
+                    st.write("Unclustered Keywords:")
+                    st.write(list(corpus_set))
+                    
+                    # Create a DataFrame of unclustered keywords
+                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
+                    
+                    # Download button for unclustered keywords
+                    csv_data_unclustered = unclustered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Unclustered Keywords",
+                        data=csv_data_unclustered,
+                        file_name="Unclustered_Keywords.csv",
+                        mime="text/csv"
+                    )
 
     except pd.errors.EmptyDataError:
         st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
+        st.error("Please check your data and try again.")
