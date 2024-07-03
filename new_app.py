@@ -1,159 +1,219 @@
 import streamlit as st
-from sentence_transformers import SentenceTransformer
-import numpy as np
 import pandas as pd
-from sklearn.cluster import SpectralClustering, AgglomerativeClustering
-from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer, util
+import chardet
+from detect_delimiter import detect
+import numpy as np
+from sklearn.manifold import TSNE
+import plotly.graph_objects as go
+import colorsys
 
-def calculate_cluster_coherence(clusters):
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    cluster_coherences = {}
-    all_embeddings = []
-    all_keywords = []
+# Function to generate distinct colors in RGB format
+def generate_colors(num_colors):
+    colors = []
+    hue_values = np.linspace(0, 1, num_colors, endpoint=False)
+    np.random.shuffle(hue_values)
+    
+    for hue in hue_values:
+        lightness = (50 + np.random.rand() * 10) / 100.
+        saturation = (90 + np.random.rand() * 10) / 100.
+        rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+        colors.append(tuple(int(x * 255) for x in rgb))
+    return colors
 
-    for cluster_label, keywords in clusters.items():
-        embeddings = model.encode(keywords)
-        similarity_matrix = cosine_similarity(embeddings)
-        np.fill_diagonal(similarity_matrix, 0)
-        cluster_coherence = similarity_matrix.mean()
-        cluster_coherences[cluster_label] = cluster_coherence
-        all_embeddings.extend(embeddings)
-        all_keywords.extend(keywords)
+# Configuration
+st.title("Semantic Keyword Clustering Tool")
+st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
-    overall_coherence = np.mean(list(cluster_coherences.values()))
-    all_embeddings = np.array(all_embeddings)
-    inter_cluster_similarity = cosine_similarity(all_embeddings).mean()
+cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2'])
+uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
-    return cluster_coherences, overall_coherence, inter_cluster_similarity
+if st.button("Start Clustering"):
+    if uploaded_file:
+        try:
+            acceptable_confidence = 0.8
 
-def perform_spectral_clustering(phrases, model_name, n_clusters):
-    model = SentenceTransformer(model_name)
-    embeddings = model.encode(phrases)
+            # Read the uploaded file
+            raw_data = uploaded_file.getvalue()
+            detected = chardet.detect(raw_data)
+            encoding_type = detected['encoding']
+            if detected['confidence'] < acceptable_confidence:
+                encoding_type = 'utf-8'
+            try:
+                text_data = raw_data.decode(encoding_type)
+            except UnicodeDecodeError:
+                encoding_type = 'ISO-8859-1'
+                text_data = raw_data.decode(encoding_type)
 
-    spectral = SpectralClustering(n_clusters=n_clusters, affinity='nearest_neighbors', random_state=42)
-    cluster_labels = spectral.fit_predict(embeddings)
+            firstline = text_data.splitlines()[0]
+            
+            # Determine file type and read accordingly
+            if uploaded_file.name.endswith('.csv'):
+                delimiter_type = detect(firstline)
+                if delimiter_type:
+                    df = pd.read_csv(uploaded_file, encoding=encoding_type, delimiter=delimiter_type)
+                else:
+                    df = pd.read_csv(uploaded_file, encoding=encoding_type)
+            elif uploaded_file.name.endswith('.xlsx'):
+                df = pd.read_excel(uploaded_file, engine='openpyxl')
 
-    clusters = {}
-    noise_points = []
-    for i, label in enumerate(cluster_labels):
-        if label == -1:
-            noise_points.append(phrases[i])
-        else:
-            if label not in clusters:
-                clusters[label] = []
-            clusters[label].append(phrases[i])
+            st.write("File loaded successfully!")
+            st.write(f"Detected encoding: '{encoding_type}'")
 
-    cluster_coherences, overall_coherence, inter_cluster_similarity = calculate_cluster_coherence(clusters)
-    return clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity
+            df.rename(columns={"Search term": "Keyword", "keyword": "Keyword", "query": "Keyword", "Top queries": "Keyword", "queries": "Keyword", "Keywords": "Keyword", "keywords": "Keyword", "Search terms report": "Keyword"}, inplace=True)
 
-def perform_agglomerative_clustering(phrases, model_name):
-    model = SentenceTransformer(model_name)
-    embeddings = model.encode(phrases)
+            if "Keyword" not in df.columns:
+                st.error("Error! Please make sure your CSV or XLSX file contains a column named 'Keyword'!")
+            else:
+                # Clustering Process
+                model = SentenceTransformer(transformer)
+                corpus_set = set(df['Keyword'])
+                corpus_set_all = corpus_set
+                cluster_name_list = []
+                corpus_sentences_list = []
+                df_all = []
+                cluster = True
+                iterations = 0
 
-    agglo = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, linkage='ward')
-    cluster_labels = agglo.fit_predict(embeddings)
+                while cluster:
+                    corpus_sentences = list(corpus_set)
+                    check_len = len(corpus_sentences)
 
-    clusters = {}
-    noise_points = []
-    for i, label in enumerate(cluster_labels):
-        if label == -1:
-            noise_points.append(phrases[i])
-        else:
-            if label not in clusters:
-                clusters[label] = []
-            clusters[label].append(phrases[i])
+                    corpus_embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
+                    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
 
-    cluster_coherences, overall_coherence, inter_cluster_similarity = calculate_cluster_coherence(clusters)
-    return clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity
+                    for keyword, cluster in enumerate(clusters):
+                        for sentence_id in cluster:
+                            corpus_sentences_list.append(corpus_sentences[sentence_id])
+                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
 
-def get_semantic_name(keywords, model):
-    embeddings = model.encode(keywords)
-    similarity_matrix = cosine_similarity(embeddings)
-    avg_similarities = similarity_matrix.mean(axis=1)
-    semantic_name = keywords[np.argmax(avg_similarities)]
-    return semantic_name
+                    df_new = pd.DataFrame(None)
+                    df_new['Cluster Name'] = cluster_name_list
+                    df_new["Keyword"] = corpus_sentences_list
 
-st.title("Keyword Clustering App")
+                    df_all.append(df_new)
+                    have = set(df_new["Keyword"])
 
-uploaded_file = st.file_uploader("Upload a CSV file with a column named 'Keyword'", type="csv")
+                    corpus_set = corpus_set_all - have
+                    remaining = len(corpus_set)
+                    iterations += 1
+                    if check_len == remaining:
+                        break
 
-if uploaded_file:
-    phrases = pd.read_csv(uploaded_file)['Keyword'].tolist()
-    total_phrases = len(phrases)
+                df_new = pd.concat(df_all)
+                df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-    model_name = 'sentence-transformers/all-mpnet-base-v2'
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
 
-    st.sidebar.subheader("Select Clustering Algorithm")
-    clustering_algorithm = st.sidebar.radio("Algorithm", ("Spectral Clustering", "Agglomerative Clustering"))
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
 
-    if clustering_algorithm == "Spectral Clustering":
-        n_clusters = st.sidebar.slider('Select number of clusters', min_value=2, max_value=20, value=5)
-        clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity = perform_spectral_clustering(phrases, model_name, n_clusters)
-    else:
-        clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity = perform_agglomerative_clustering(phrases, model_name)
+                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
-    final_clusters = {}
-    final_noise_points = []
-    final_coherences = []
+                del df['Length']
 
-    for label, coherence in cluster_coherences.items():
-        if coherence < 0.55:
-            final_noise_points.extend(clusters[label])
-        else:
-            final_clusters[label] = clusters[label]
-            final_coherences.append(coherence)
+                col = df.pop("Keyword")
+                df.insert(0, col.name, col)
 
-    if final_coherences:
-        final_overall_coherence = np.mean(final_coherences)
-    else:
-        final_overall_coherence = 0
+                col = df.pop('Cluster Name')
+                df.insert(0, col.name, col)
 
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    semantic_clusters = {}
-    used_names = set()
-    for label, keywords in final_clusters.items():
-        semantic_name = get_semantic_name(keywords, model)
-        if semantic_name in used_names:
-            count = 1
-            new_semantic_name = f"{semantic_name}_{count}"
-            while new_semantic_name in used_names:
-                count += 1
-                new_semantic_name = f"{semantic_name}_{count}"
-            semantic_name = new_semantic_name
-        used_names.add(semantic_name)
-        semantic_clusters[semantic_name] = keywords
+                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
-    st.subheader("Final Clusters:")
-    for semantic_name, keywords in semantic_clusters.items():
-        st.markdown(f"**{semantic_name}**:")
-        for phrase in keywords:
-            st.markdown(f"- {phrase}")
+                uncluster_percent = (remaining / len(df)) * 100
+                clustered_percent = 100 - uncluster_percent
+                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
+                st.write(f"Number of iterations: {iterations}")
+                st.write(f"Total unclustered keywords: {remaining}")
 
-    if final_noise_points:
-        st.subheader("Final Noise points (unclustered):")
-        for phrase in final_noise_points:
-            st.markdown(f"- {phrase}")
+                # Print number of clusters
+                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
 
-    st.write(f"Final noise ratio: {len(final_noise_points) / total_phrases:.2%}")
-    st.write(f"Final overall coherence: {final_overall_coherence:.4f}")
+                # Save results with only 'Cluster' and 'Keywords' columns
+                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+                result_df.columns = ['Cluster', 'Keywords']
 
-    ranked_clusters = sorted([(label, coherence) for label, coherence in cluster_coherences.items() if coherence >= 0.55], key=lambda x: x[1], reverse=True)
-    st.subheader("Clusters ranked by coherence:")
-    for rank, (label, coherence) in enumerate(ranked_clusters, 1):
-        semantic_name = get_semantic_name(final_clusters[label], model)
-        st.markdown(f"{rank}. **{semantic_name}**: {coherence:.4f}")
+                # Display result dataframe
+                st.write(result_df)
 
-    save_path = 'final_clusters.csv'
-    cluster_data = []
+                # Generate 3D plot of clusters
+                # Assuming you have numerical embeddings or features for each keyword
+                # For demonstration, let's create random data
+                np.random.seed(42)
+                num_keywords = len(df['Keyword'])
+                embeddings_3d = np.random.randn(num_keywords, 3)  # Replace with your actual 3D embeddings
 
-    for label, keywords in final_clusters.items():
-        semantic_name = get_semantic_name(keywords, model)
-        cluster_data.append({'Cluster': semantic_name, 'Keywords': ', '.join(keywords)})
+                # Generate colors for clusters
+                unique_clusters = df['Cluster Name'].unique()
+                num_clusters = len(unique_clusters)
+                cluster_colors = generate_colors(max(num_clusters, 100))
 
-    if final_noise_points:
-        cluster_data.append({'Cluster': 'Unclustered', 'Keywords': ', '.join(final_noise_points)})
+                # Create a figure for the 3D scatter plot
+                fig_3d = go.Figure()
 
-    df = pd.DataFrame(cluster_data)
-    df.to_csv(save_path, index=False)
+                for i, cluster in enumerate(unique_clusters):
+                    cluster_data = df[df['Cluster Name'] == cluster]
+                    fig_3d.add_trace(go.Scatter3d(
+                        x=embeddings_3d[cluster_data.index, 0],
+                        y=embeddings_3d[cluster_data.index, 1],
+                        z=embeddings_3d[cluster_data.index, 2],
+                        mode='markers',
+                        marker=dict(
+                            size=8,
+                            color=f'rgb{cluster_colors[i]}',
+                            opacity=0.8,
+                        ),
+                        text=cluster_data['Keyword'],  # Display keyword names on hover
+                        hoverinfo='text',  # Show only text (keyword names) on hover
+                        name=cluster
+                    ))
 
-    st.success(f"Cluster Data saved to CSV file at {save_path}.")
+                # Update layout for 3D scatter plot
+                fig_3d.update_layout(
+                    width=800,
+                    height=700,
+                    title='Keyword Clusters in 3D Space',
+                    scene=dict(
+                        xaxis_title='X Axis',
+                        yaxis_title='Y Axis',
+                        zaxis_title='Z Axis'
+                    ),
+                    margin=dict(l=0, r=0, b=0, t=0)
+                )
+
+                # Display 3D scatter plot using Streamlit
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+                # Download button for clustered keywords
+                csv_data_clustered = result_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Clustered Keywords",
+                    data=csv_data_clustered,
+                    file_name="Clustered_Keywords.csv",
+                    mime="text/csv"
+                )
+
+                # Display unclustered keywords and add download button
+                if remaining > 0:
+                    st.write("Unclustered Keywords:")
+                    st.write(list(corpus_set))
+                    
+                    # Create a DataFrame of unclustered keywords
+                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
+                    
+                    # Download button for unclustered keywords
+                    csv_data_unclustered = unclustered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Unclustered Keywords",
+                        data=csv_data_unclustered,
+                        file_name="Unclustered_Keywords.csv",
+                        mime="text/csv"
+                    )
+
+        except pd.errors.EmptyDataError:
+            st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {e}")
