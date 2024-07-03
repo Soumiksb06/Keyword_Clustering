@@ -33,25 +33,7 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
             distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
             coherence = 1 / (1 + np.mean(distances))
             coherences.append(coherence)
-        else:
-            coherences.append(0)  # Single-element clusters get 0 coherence
     return coherences
-
-# Function to perform clustering
-def perform_clustering(corpus_sentences, corpus_embeddings, clustering_method, **kwargs):
-    if clustering_method == "Community Detection":
-        clusters = util.community_detection(corpus_embeddings, min_community_size=kwargs.get('min_cluster_size', 3), threshold=kwargs.get('cluster_accuracy', 0.8))
-        cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
-    elif clustering_method == "Agglomerative":
-        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=kwargs.get('distance_threshold', 2.5))
-        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
-    elif clustering_method == "K-means":
-        clustering_model = KMeans(n_clusters=kwargs.get('n_clusters', 5))
-        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
-    
-    coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
-    
-    return cluster_labels, coherences
 
 # Configuration
 st.title("Semantic Keyword Clustering Tool")
@@ -64,14 +46,13 @@ clustering_method = st.sidebar.selectbox(
 )
 
 # Conditional inputs based on clustering method
-kwargs = {}
 if clustering_method == "Community Detection":
-    kwargs['cluster_accuracy'] = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
-    kwargs['min_cluster_size'] = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
 elif clustering_method == "Agglomerative":
-    kwargs['distance_threshold'] = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
+    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
 elif clustering_method == "K-means":
-    kwargs['n_clusters'] = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
 
 transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
 
@@ -149,14 +130,31 @@ if uploaded_file:
                 if len(corpus_embeddings.shape) == 1:
                     corpus_embeddings = corpus_embeddings.reshape(1, -1)
                 
-                cluster_labels, coherences = perform_clustering(corpus_sentences, corpus_embeddings, clustering_method, **kwargs)
+                if clustering_method == "Community Detection":
+                    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                    cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
+                elif clustering_method == "Agglomerative":
+                    max_clusters = len(corpus_sentences) // 4
+                    while True:
+                        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
+                        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+                        n_clusters = len(np.unique(cluster_labels))
+                        if n_clusters <= max_clusters:
+                            break
+                        distance_threshold += 0.1
+                    st.write(f"Adjusted distance threshold: {distance_threshold:.2f}")
+                    st.write(f"Number of clusters formed: {n_clusters}")
+                elif clustering_method == "K-means":
+                    clustering_model = KMeans(n_clusters=n_clusters)
+                    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
-                # Keep only clusters with coherence > 0.55
-                valid_clusters = [i for i, coh in enumerate(coherences) if coh > 0.55]
-                valid_mask = np.isin(cluster_labels, valid_clusters)
-                
-                for sentence_id, (is_valid, cluster_id) in enumerate(zip(valid_mask, cluster_labels)):
-                    if is_valid:
+                if clustering_method == "Community Detection":
+                    for keyword, cluster in enumerate(clusters):
+                        for sentence_id in cluster:
+                            corpus_sentences_list.append(corpus_sentences[sentence_id])
+                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
+                else:
+                    for sentence_id, cluster_id in enumerate(cluster_labels):
                         corpus_sentences_list.append(corpus_sentences[sentence_id])
                         cluster_name_list.append(f"Cluster {cluster_id + 1}")
 
@@ -206,12 +204,17 @@ if uploaded_file:
                 # Print number of clusters
                 st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
 
-                # Calculate overall coherence
-                if len(corpus_embeddings) > 1 and any(coh > 0.55 for coh in coherences):
-                    overall_coherence = np.mean([coh for coh in coherences if coh > 0.55])
+                # Calculate cluster coherences
+                if len(corpus_embeddings) > 1:
+                    cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+                    overall_coherence = np.mean(cluster_coherences)
+
                     st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                    st.write("Cluster Coherences:")
+                    for i, coherence in enumerate(cluster_coherences):
+                        st.write(f"Cluster {i+1}: {coherence:.4f}")
                 else:
-                    st.write("Coherence: Not applicable (insufficient data or no valid clusters)")
+                    st.write("Coherence: Not applicable (insufficient data)")
 
                 # Save results with only 'Cluster' and 'Keywords' columns
                 result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
