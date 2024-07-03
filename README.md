@@ -1,3 +1,3 @@
 # Keyword_Clustering
 
-link to app: https://semantickeywordclustering.streamlit.app/
+link to app: https://pinak-keyword-clustering.streamlit.app/
