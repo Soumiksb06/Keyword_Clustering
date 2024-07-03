@@ -8,6 +8,7 @@ from sklearn.manifold import TSNE
 import plotly.graph_objects as go
 import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.metrics import silhouette_score
 
 # Function to generate distinct colors in RGB format
 def generate_colors(num_colors):
@@ -45,33 +46,13 @@ clustering_method = st.sidebar.selectbox(
     ["Community Detection", "Agglomerative", "K-means"]
 )
 
-# Conditional inputs based on clustering method
-if clustering_method == "Community Detection":
-    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
-    cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
-elif clustering_method == "Agglomerative":
-    max_clusters = len(corpus_sentences) // 4
-    while True:
-        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
-        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
-        n_clusters = len(np.unique(cluster_labels))
-        if n_clusters <= max_clusters:
-            break
-        distance_threshold += 0.1
-    st.write(f"Adjusted distance threshold: {distance_threshold:.2f}")
-    st.write(f"Number of clusters formed: {n_clusters}")
-elif clustering_method == "K-means":
-    clustering_model = KMeans(n_clusters=n_clusters)
-    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
-
+cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
 transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
+
 # Add number of clusters selection for K-means
 if clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
-
-# Add distance threshold input for Agglomerative clustering
-if clustering_method == "Agglomerative":
-    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
@@ -151,16 +132,8 @@ if uploaded_file:
                     clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
                     cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
                 elif clustering_method == "Agglomerative":
-                    max_clusters = len(corpus_sentences) // 4
-                    while True:
-                        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
-                        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
-                        n_clusters = len(np.unique(cluster_labels))
-                        if n_clusters <= max_clusters:
-                            break
-                        distance_threshold += 0.1
-                    st.write(f"Adjusted distance threshold: {distance_threshold:.2f}")
-                    st.write(f"Number of clusters formed: {n_clusters}")
+                    clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=1-cluster_accuracy)
+                    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
                 elif clustering_method == "K-means":
                     clustering_model = KMeans(n_clusters=n_clusters)
                     cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
@@ -230,8 +203,15 @@ if uploaded_file:
                     st.write("Cluster Coherences:")
                     for i, coherence in enumerate(cluster_coherences):
                         st.write(f"Cluster {i+1}: {coherence:.4f}")
+
+                    # Calculate silhouette score
+                    if len(np.unique(cluster_labels)) > 1:
+                        silhouette_avg = silhouette_score(corpus_embeddings.cpu().numpy(), cluster_labels)
+                        st.write(f"Silhouette Score: {silhouette_avg:.4f}")
+                    else:
+                        st.write("Silhouette Score: Not applicable (only one cluster formed)")
                 else:
-                    st.write("Coherence: Not applicable (insufficient data)")
+                    st.write("Coherence and Silhouette Score: Not applicable (insufficient data)")
 
                 # Save results with only 'Cluster' and 'Keywords' columns
                 result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
