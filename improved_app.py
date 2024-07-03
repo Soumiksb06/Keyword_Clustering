@@ -92,6 +92,19 @@ if uploaded_file:
         if "Keyword" not in df.columns:
             st.error("Error! Please make sure your CSV or XLSX file contains a column named 'Keyword'!")
         else:
+            # Data validation
+            st.write(f"Total rows: {len(df)}")
+            st.write(f"Number of unique keywords: {df['Keyword'].nunique()}")
+            st.write("Data types in 'Keyword' column:")
+            st.write(df['Keyword'].apply(type).value_counts())
+            
+            # Convert all values in the 'Keyword' column to strings
+            df['Keyword'] = df['Keyword'].astype(str)
+            
+            # Display a sample of the data
+            st.write("Sample of the data (first 5 rows):")
+            st.write(df.head())
+
             # Clustering Process
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
