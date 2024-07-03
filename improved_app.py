@@ -204,45 +204,45 @@ if uploaded_file:
 
                 st.write(result_df)
 
-                np.random.seed(42)
-                num_keywords = len(df['Keyword'])
-                embeddings_3d = np.random.randn(num_keywords, 3)
+                # Generate 3D embeddings for visualization
+                embeddings_3d = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
 
-                unique_clusters = df['Cluster Name'].unique()
-                num_clusters = len(unique_clusters)
-                cluster_colors = generate_colors(max(num_clusters, 100))
+                # Normalize the embeddings to [0, 1] range for coloring
+                embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
 
-                fig_3d = go.Figure()
+                # Create a color scale based on the normalized embeddings
+                colors = ['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255)) 
+                          for r, g, b in embeddings_normalized]
 
-                for i, cluster in enumerate(unique_clusters):
-                    cluster_data = df[df['Cluster Name'] == cluster]
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=embeddings_3d[cluster_data.index, 0],
-                        y=embeddings_3d[cluster_data.index, 1],
-                        z=embeddings_3d[cluster_data.index, 2],
-                        mode='markers',
-                        marker=dict(
-                            size=8,
-                            color=f'rgb{cluster_colors[i]}',
-                            opacity=0.8,
-                        ),
-                        text=cluster_data['Keyword'],
-                        hoverinfo='text',
-                        name=cluster
-                    ))
+                # Create the 3D scatter plot
+                fig_3d = go.Figure(data=[go.Scatter3d(
+                    x=embeddings_3d[:, 0],
+                    y=embeddings_3d[:, 1],
+                    z=embeddings_3d[:, 2],
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color=colors,
+                        opacity=0.8
+                    ),
+                    text=df['Keyword'],
+                    hoverinfo='text'
+                )])
 
+                # Update layout for 3D scatter plot
                 fig_3d.update_layout(
                     width=800,
                     height=700,
-                    title='Keyword Clusters in 3D Space',
+                    title='Keyword Embeddings in 3D Space',
                     scene=dict(
-                        xaxis_title='X Axis',
-                        yaxis_title='Y Axis',
-                        zaxis_title='Z Axis'
+                        xaxis_title='Dimension 1',
+                        yaxis_title='Dimension 2',
+                        zaxis_title='Dimension 3'
                     ),
-                    margin=dict(l=0, r=0, b=0, t=0)
+                    margin=dict(l=0, r=0, b=0, t=40)
                 )
 
+                # Display 3D scatter plot using Streamlit
                 st.plotly_chart(fig_3d, use_container_width=True)
 
                 csv_data_clustered = result_df.to_csv(index=False)
