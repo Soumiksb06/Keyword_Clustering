@@ -56,7 +56,7 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
 min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'roberta-base', 'bert-base-uncased', 'distilbert-base-uncased'])
+transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2','paraphrase-mpnet-base-v2', 'all-mpnet-base-v2', 'roberta-base', 'bert-base-uncased', 'distilbert-base-uncased'])
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
 # Sidebar for choosing clustering method
