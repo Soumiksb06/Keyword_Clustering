@@ -2,7 +2,7 @@ import streamlit as st
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import pandas as pd
-import hdbscan
+from sklearn.cluster import SpectralClustering, AgglomerativeClustering
 from sklearn.metrics.pairwise import cosine_similarity
 
 def calculate_cluster_coherence(clusters):
@@ -26,19 +26,32 @@ def calculate_cluster_coherence(clusters):
 
     return cluster_coherences, overall_coherence, inter_cluster_similarity
 
-def perform_clustering(phrases, model_name, min_cluster_size):
-    if len(phrases) < 2:
-        return {}, phrases, 0, {}, 0
-
+def perform_spectral_clustering(phrases, model_name, n_clusters):
     model = SentenceTransformer(model_name)
     embeddings = model.encode(phrases)
-    similarities = cosine_similarity(embeddings)
-    distances = 1 - similarities
-    distances = np.asarray(distances, dtype=np.float64)
-    np.fill_diagonal(distances, 0)
 
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, metric='precomputed', gen_min_span_tree=True)
-    cluster_labels = clusterer.fit_predict(distances)
+    spectral = SpectralClustering(n_clusters=n_clusters, affinity='nearest_neighbors', random_state=42)
+    cluster_labels = spectral.fit_predict(embeddings)
+
+    clusters = {}
+    noise_points = []
+    for i, label in enumerate(cluster_labels):
+        if label == -1:
+            noise_points.append(phrases[i])
+        else:
+            if label not in clusters:
+                clusters[label] = []
+            clusters[label].append(phrases[i])
+
+    cluster_coherences, overall_coherence, inter_cluster_similarity = calculate_cluster_coherence(clusters)
+    return clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity
+
+def perform_agglomerative_clustering(phrases, model_name):
+    model = SentenceTransformer(model_name)
+    embeddings = model.encode(phrases)
+
+    agglo = AgglomerativeClustering(n_clusters=None, distance_threshold=0.5, linkage='ward')
+    cluster_labels = agglo.fit_predict(embeddings)
 
     clusters = {}
     noise_points = []
@@ -68,49 +81,26 @@ if uploaded_file:
     phrases = pd.read_csv(uploaded_file)['Keyword'].tolist()
     total_phrases = len(phrases)
 
-    models = [
-        'sentence-transformers/paraphrase-mpnet-base-v2',
-        'sentence-transformers/all-mpnet-base-v2'
-    ]
+    model_name = 'sentence-transformers/all-mpnet-base-v2'
 
-    iteration = 0
-    all_clusters = {}
-    all_cluster_coherences = {}
-    remaining_phrases = phrases.copy()
-    noise_ratio_history = []
+    st.sidebar.subheader("Select Clustering Algorithm")
+    clustering_algorithm = st.sidebar.radio("Algorithm", ("Spectral Clustering", "Agglomerative Clustering"))
 
-    while True:
-        model = models[iteration % len(models)]
-        min_cluster_size = max(5 - iteration, 2)
-
-        clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity = perform_clustering(remaining_phrases, model, min_cluster_size)
-
-        for label, cluster in clusters.items():
-            new_label = len(all_clusters)
-            all_clusters[new_label] = cluster
-            all_cluster_coherences[new_label] = cluster_coherences[label]
-
-        noise_ratio = len(noise_points) / total_phrases
-        noise_ratio_history.append(noise_ratio)
-
-        if overall_coherence > 0.55:
-            break
-
-        remaining_phrases = noise_points
-        iteration += 1
-
-        if len(remaining_phrases) <= 1 or len(remaining_phrases) == len(phrases):
-            break
+    if clustering_algorithm == "Spectral Clustering":
+        n_clusters = st.sidebar.slider('Select number of clusters', min_value=2, max_value=20, value=5)
+        clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity = perform_spectral_clustering(phrases, model_name, n_clusters)
+    else:
+        clusters, noise_points, overall_coherence, cluster_coherences, inter_cluster_similarity = perform_agglomerative_clustering(phrases, model_name)
 
     final_clusters = {}
     final_noise_points = []
     final_coherences = []
 
-    for label, coherence in all_cluster_coherences.items():
+    for label, coherence in cluster_coherences.items():
         if coherence < 0.55:
-            final_noise_points.extend(all_clusters[label])
+            final_noise_points.extend(clusters[label])
         else:
-            final_clusters[label] = all_clusters[label]
+            final_clusters[label] = clusters[label]
             final_coherences.append(coherence)
 
     if final_coherences:
@@ -135,25 +125,25 @@ if uploaded_file:
 
     st.subheader("Final Clusters:")
     for semantic_name, keywords in semantic_clusters.items():
-        st.markdown(f"**{semantic_name}** (Coherence: {all_cluster_coherences[semantic_name]:.4f}):")
+        st.markdown(f"**{semantic_name}**:")
         for phrase in keywords:
             st.markdown(f"- {phrase}")
 
-    st.subheader("Final Noise points (unclustered):")
-    for phrase in final_noise_points:
-        st.markdown(f"- {phrase}")
+    if final_noise_points:
+        st.subheader("Final Noise points (unclustered):")
+        for phrase in final_noise_points:
+            st.markdown(f"- {phrase}")
 
     st.write(f"Final noise ratio: {len(final_noise_points) / total_phrases:.2%}")
     st.write(f"Final overall coherence: {final_overall_coherence:.4f}")
 
-    ranked_clusters = sorted([(label, coherence) for label, coherence in all_cluster_coherences.items() if coherence >= 0.55], key=lambda x: x[1], reverse=True)
+    ranked_clusters = sorted([(label, coherence) for label, coherence in cluster_coherences.items() if coherence >= 0.55], key=lambda x: x[1], reverse=True)
     st.subheader("Clusters ranked by coherence:")
     for rank, (label, coherence) in enumerate(ranked_clusters, 1):
         semantic_name = get_semantic_name(final_clusters[label], model)
         st.markdown(f"{rank}. **{semantic_name}**: {coherence:.4f}")
 
-    save_path = '/content/drive/MyDrive/final_clusters.csv'
-
+    save_path = 'final_clusters.csv'
     cluster_data = []
 
     for label, keywords in final_clusters.items():
