@@ -8,6 +8,7 @@ from sklearn.manifold import TSNE
 import plotly.graph_objects as go
 import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
+import torch
 
 # Function to generate distinct colors in RGB format
 def generate_colors(num_colors):
@@ -133,6 +134,31 @@ if uploaded_file:
                 if clustering_method == "Community Detection":
                     clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
                     cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
+                    
+                    # Calculate coherence for community detection
+                    coherences = []
+                    for cluster in clusters:
+                        if len(cluster) > 1:
+                            cluster_embeddings = corpus_embeddings[cluster]
+                            centroid = torch.mean(cluster_embeddings, dim=0)
+                            distances = torch.norm(cluster_embeddings - centroid, dim=1)
+                            coherence = 1 / (1 + torch.mean(distances).item())
+                            coherences.append(coherence)
+                    
+                    if coherences:
+                        overall_coherence = np.mean(coherences)
+                        st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                        st.write("Cluster Coherences:")
+                        for i, coherence in enumerate(coherences):
+                            st.write(f"Cluster {i+1}: {coherence:.4f}")
+                    else:
+                        st.write("Coherence: Not applicable (insufficient data)")
+                    
+                    # Debug prints
+                    print("Number of clusters:", len(clusters))
+                    print("Cluster sizes:", [len(cluster) for cluster in clusters])
+                    print("Coherences:", coherences)
+                    
                 elif clustering_method == "Agglomerative":
                     max_clusters = len(corpus_sentences) // 4
                     while True:
@@ -204,8 +230,8 @@ if uploaded_file:
                 # Print number of clusters
                 st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
 
-                # Calculate cluster coherences
-                if len(corpus_embeddings) > 1:
+                # Calculate cluster coherences for non-community detection methods
+                if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
                     cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
                     overall_coherence = np.mean(cluster_coherences)
 
@@ -213,8 +239,6 @@ if uploaded_file:
                     st.write("Cluster Coherences:")
                     for i, coherence in enumerate(cluster_coherences):
                         st.write(f"Cluster {i+1}: {coherence:.4f}")
-                else:
-                    st.write("Coherence: Not applicable (insufficient data)")
 
                 # Save results with only 'Cluster' and 'Keywords' columns
                 result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
