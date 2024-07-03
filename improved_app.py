@@ -8,6 +8,7 @@ from sklearn.manifold import TSNE
 import plotly.graph_objects as go
 import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.metrics import silhouette_score
 
 # Function to generate distinct colors in RGB format
 def generate_colors(num_colors):
@@ -22,6 +23,19 @@ def generate_colors(num_colors):
         colors.append(tuple(int(x * 255) for x in rgb))
     return colors
 
+# Function to calculate cluster coherence
+def calculate_cluster_coherence(embeddings, cluster_labels):
+    unique_labels = np.unique(cluster_labels)
+    coherences = []
+    for label in unique_labels:
+        cluster_embeddings = embeddings[cluster_labels == label]
+        if len(cluster_embeddings) > 1:
+            centroid = np.mean(cluster_embeddings, axis=0)
+            distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
+            coherence = 1 / (1 + np.mean(distances))
+            coherences.append(coherence)
+    return coherences
+
 # Configuration
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
@@ -34,7 +48,7 @@ clustering_method = st.sidebar.selectbox(
 
 cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
 min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2'])
+transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
 if uploaded_file:
@@ -91,13 +105,14 @@ if uploaded_file:
                 
                 if clustering_method == "Community Detection":
                     clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                    cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
                 elif clustering_method == "Agglomerative":
                     clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=1-cluster_accuracy)
-                    clusters = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+                    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
                 elif clustering_method == "K-means":
                     n_clusters = max(int(len(corpus_sentences) / min_cluster_size), 2)
                     clustering_model = KMeans(n_clusters=n_clusters)
-                    clusters = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+                    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
                 if clustering_method == "Community Detection":
                     for keyword, cluster in enumerate(clusters):
@@ -105,7 +120,7 @@ if uploaded_file:
                             corpus_sentences_list.append(corpus_sentences[sentence_id])
                             cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
                 else:
-                    for sentence_id, cluster_id in enumerate(clusters):
+                    for sentence_id, cluster_id in enumerate(cluster_labels):
                         corpus_sentences_list.append(corpus_sentences[sentence_id])
                         cluster_name_list.append(f"Cluster {cluster_id + 1}")
 
@@ -151,6 +166,19 @@ if uploaded_file:
 
             # Print number of clusters
             st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+
+            # Calculate cluster coherences
+            cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+            overall_coherence = np.mean(cluster_coherences)
+
+            st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+            st.write("Cluster Coherences:")
+            for i, coherence in enumerate(cluster_coherences):
+                st.write(f"Cluster {i+1}: {coherence:.4f}")
+
+            # Calculate silhouette score
+            silhouette_avg = silhouette_score(corpus_embeddings.cpu().numpy(), cluster_labels)
+            st.write(f"Silhouette Score: {silhouette_avg:.4f}")
 
             # Save results with only 'Cluster' and 'Keywords' columns
             result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
