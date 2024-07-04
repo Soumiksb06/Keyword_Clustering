@@ -9,6 +9,7 @@ import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import torch
 from sklearn.decomposition import PCA
+from langdetect import detect_langs
 
 def generate_colors(num_colors):
     colors = []
@@ -34,6 +35,18 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
             coherences.append(coherence)
     return coherences
 
+def detect_encoding(file):
+    raw_data = file.read()
+    file.seek(0)  # Reset file pointer
+    result = chardet.detect(raw_data)
+    return result['encoding']
+
+def detect_language(text):
+    try:
+        return detect_langs(text)[0].lang
+    except:
+        return 'unknown'
+
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
@@ -53,34 +66,22 @@ elif clustering_method == "K-means":
 
 transformer = st.selectbox(
     "Select Transformer Model",
-    ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
-    help="**all-MiniLM-L6-v2:** Fast and good for small datasets.\n\nWhen to use: If you have a small number of keywords.\n\n**all-mpnet-base-v2:** Balanced and good for medium datasets.\n\nWhen to use: If you have a medium number of keywords.\n\n**paraphrase-mpnet-base-v2:** Very accurate and good for large datasets.\n\nWhen to use: If you have a large number of keywords."
+    ['distiluse-base-multilingual-cased-v2', 'paraphrase-multilingual-mpnet-base-v2', 'all-MiniLM-L6-v2'],
+    help="**distiluse-base-multilingual-cased-v2:** Supports 50+ languages, good for multilingual datasets.\n\n**paraphrase-multilingual-mpnet-base-v2:** Very accurate, supports 100+ languages.\n\n**all-MiniLM-L6-v2:** Fast, but primarily for English."
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
 if uploaded_file:
     try:
-        raw_data = uploaded_file.getvalue()
-        detected = chardet.detect(raw_data)
-        encoding_type = detected['encoding'] if detected['confidence'] >= 0.8 else 'utf-8'
-        
-        try:
-            text_data = raw_data.decode(encoding_type)
-        except UnicodeDecodeError:
-            encoding_type = 'ISO-8859-1'
-            text_data = raw_data.decode(encoding_type)
-
-        firstline = text_data.splitlines()[0]
-        
+        encoding = detect_encoding(uploaded_file)
         if uploaded_file.name.endswith('.csv'):
-            delimiter_type = detect(firstline)
-            df = pd.read_csv(uploaded_file, encoding=encoding_type, delimiter=delimiter_type or ',').dropna()
+            df = pd.read_csv(uploaded_file, encoding=encoding)
         elif uploaded_file.name.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file, engine='openpyxl').dropna()
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
 
         st.write("File loaded successfully!")
-        st.write(f"Detected encoding: '{encoding_type}'")
+        st.write(f"Detected encoding: '{encoding}'")
 
         df.rename(columns={"Search term": "Keyword", "keyword": "Keyword", "query": "Keyword", "Top queries": "Keyword", "queries": "Keyword", "Keywords": "Keyword", "keywords": "Keyword", "Search terms report": "Keyword"}, inplace=True)
 
@@ -96,6 +97,13 @@ if uploaded_file:
             
             st.write("Sample of the data (first 5 rows):")
             st.write(df['Keyword'].head())
+
+            sample_keywords = df['Keyword'].sample(min(100, len(df))).tolist()
+            detected_languages = [detect_language(keyword) for keyword in sample_keywords]
+            main_language = max(set(detected_languages), key=detected_languages.count)
+
+            st.write(f"Detected main language: {main_language}")
+            st.write("Other detected languages: " + ', '.join(set(detected_languages) - {main_language, 'unknown'}))
 
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
@@ -262,7 +270,8 @@ if uploaded_file:
                     margin=dict(l=0, r=0, b=0, t=40)
                 )
 
-                st.plotly_chart(fig_3d, use_container_width=True, help="The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts.")
+                st.plotly_chart(fig_3d, use_container_width=True, help="The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts. This visualization works for multiple languages.")
+
                 csv_data_clustered = result_df.to_csv(index=False)
                 st.download_button(
                     label="Download Clustered Keywords",
@@ -284,6 +293,8 @@ if uploaded_file:
                         file_name="Unclustered_Keywords.csv",
                         mime="text/csv"
                     )
+
+                st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
 
     except pd.errors.EmptyDataError:
         st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
