@@ -49,7 +49,7 @@ if clustering_method == "Community Detection":
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
 elif clustering_method == "K-means":
-    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=5)
 
 transformer = st.selectbox(
     "Select Transformer Model",
