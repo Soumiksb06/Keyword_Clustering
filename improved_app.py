@@ -135,10 +135,10 @@ if uploaded_file:
                         overall_coherence = np.mean(coherences)
                         st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
                         st.write("Cluster Coherences:")
-                        for i, coherence in enumerate(coherences):
-                            st.write(f"Cluster {i+1}: {coherence:.4f}")
-                    else:
-                        st.write("Coherence: Not applicable (insufficient data)")
+                        for cluster, coherence in zip(clusters, coherences):
+                            cluster_keywords = [corpus_sentences[i] for i in cluster]
+                            cluster_name = min(cluster_keywords, key=len)
+                            st.write(f"{cluster_name}: {coherence:.4f}")
                     
                 elif clustering_method == "Agglomerative":
                     max_clusters = len(corpus_sentences) // 4
@@ -208,8 +208,9 @@ if uploaded_file:
 
                     st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
                     st.write("Cluster Coherences:")
-                    for i, coherence in enumerate(cluster_coherences):
-                        st.write(f"Cluster {i+1}: {coherence:.4f}")
+                    cluster_names = df.groupby('Cluster Name')['Keyword'].first()
+                    for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
+                        st.write(f"{cluster_name}: {coherence:.4f}")
 
                 result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
                 result_df.columns = ['Cluster', 'Keywords']
