@@ -36,28 +36,25 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
-st.write("**Note:** The dataset must contain a column named 'Keyword', 'keywords', 'query', 'Top queries', 'queries', or 'Search terms report'.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
     ["Community Detection", "Agglomerative", "K-means"],
-    help="**Community Detection:** Finds natural groups in your data.\n\n**When to use:** If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\n**When to use:** If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\n**When to use:** If you already know how many groups you want."
+    help="Community Detection: Best for discovering organic clusters with varying sizes.\nAgglomerative: Useful for hierarchical clustering with a defined distance threshold.\nK-means: Effective when you have a predefined number of clusters."
 )
 
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-    st.write("**Tip:** If the groups are too big or mixed, increase the accuracy. If the groups are too small or too many, decrease the accuracy.")
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
-    st.write("**Tip:** Increase the threshold for fewer, bigger groups. Decrease it for more, smaller groups.")
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
 
 transformer = st.selectbox(
     "Select Transformer Model",
     ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
-    help="**all-MiniLM-L6-v2:** Fast and good for small datasets.\n\n**When to use:** If you have a small number of keywords.\n\n**all-mpnet-base-v2:** Balanced and good for medium datasets.\n\n**When to use:** If you have a medium number of keywords.\n\n**paraphrase-mpnet-base-v2:** Very accurate and good for large datasets.\n\n**When to use:** If you have a large number of keywords."
+    help="all-MiniLM-L6-v2: Lightweight and fast, suitable for small datasets.\nall-mpnet-base-v2: Balanced between performance and speed, good for medium-sized datasets.\nparaphrase-mpnet-base-v2: High accuracy, ideal for large datasets and detailed analysis."
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
@@ -162,7 +159,7 @@ if uploaded_file:
                     for keyword, cluster in enumerate(clusters):
                         for sentence_id in cluster:
                             corpus_sentences_list.append(corpus_sentences[sentence_id])
-                            cluster_name_list.append(f"Cluster {keyword + 1}")
+                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
                 else:
                     for sentence_id, cluster_id in enumerate(cluster_labels):
                         corpus_sentences_list.append(corpus_sentences[sentence_id])
@@ -185,10 +182,39 @@ if uploaded_file:
                 df_new = pd.concat(df_all)
                 df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform(lambda x: ', '.join(x))
+                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
-                st.write("Clustered Keywords:")
-                st.write(df.groupby('Cluster Name')['Keyword'].apply(lambda x: ', '.join(x)))
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df = df.drop('Length', axis=1)
+
+                df = df[['Cluster Name', 'Keyword']]
+
+                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
+
+                uncluster_percent = (remaining / len(df)) * 100
+                clustered_percent = 100 - uncluster_percent
+                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
+                st.write(f"Number of iterations: {iterations}")
+                st.write(f"Total unclustered keywords: {remaining}")
+
+                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+
+                if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
+                    cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+                    overall_coherence = np.mean(cluster_coherences)
+
+                    st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                    st.write("Cluster Coherences:")
+                    for i, coherence in enumerate(cluster_coherences):
+                        st.write(f"Cluster {i+1}: {coherence:.4f}")
+
+                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+                result_df.columns = ['Cluster', 'Keywords']
+
+                st.write(result_df)
 
                 embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
 
@@ -237,10 +263,13 @@ if uploaded_file:
 
                 st.plotly_chart(fig_3d, use_container_width=True)
 
-                csv_data_clustered = df.groupby('Cluster Name')['Keyword'].apply(lambda x: ', '.join(x)).reset_index()
-                csv_data_clustered.columns = ['Cluster', 'Keywords']
-
-                st.write(csv_data_clustered)
+                csv_data_clustered = result_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Clustered Keywords",
+                    data=csv_data_clustered,
+                    file_name="Clustered_Keywords.csv",
+                    mime="text/csv"
+                )
 
                 if remaining > 0:
                     st.write("Unclustered Keywords:")
