@@ -263,7 +263,7 @@ if uploaded_file:
                 )
 
                 st.plotly_chart(fig_3d, use_container_width=True)
-
+                help="The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts."
                 csv_data_clustered = result_df.to_csv(index=False)
                 st.download_button(
                     label="Download Clustered Keywords",
