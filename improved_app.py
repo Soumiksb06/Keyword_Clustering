@@ -179,6 +179,13 @@ if uploaded_file:
 
                 df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
+                # Reintroduce cluster renaming
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df = df.drop('Length', axis=1)
+
                 df = df[['Cluster Name', 'Keyword']]
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
