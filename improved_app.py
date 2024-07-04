@@ -40,7 +40,7 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
     ["Community Detection", "Agglomerative", "K-means"],
-    help="Community Detection: Best for discovering organic clusters with varying sizes.\nAgglomerative: Useful for hierarchical clustering with a defined distance threshold.\nK-means: Effective when you have a predefined number of clusters."
+    help="Community Detection: Best for discovering organic clusters with varying sizes.\n\nAgglomerative: Useful for hierarchical clustering with a defined distance threshold.\n\nK-means: Effective when you have a predefined number of clusters."
 )
 
 if clustering_method == "Community Detection":
