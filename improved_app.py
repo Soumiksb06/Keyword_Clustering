@@ -41,7 +41,7 @@ st.write("**Note:** The dataset must contain a column named 'Keyword', 'keywords
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
     ["Community Detection", "Agglomerative", "K-means"],
-    help="**Community Detection:** Best for discovering organic clusters with varying sizes.\n\n**Agglomerative:** Useful for hierarchical clustering with a defined distance threshold.\n\n**K-means:** Effective when you have a predefined number of clusters."
+    help="**Community Detection:** Finds natural groups in your data.\n\n**When to use:** If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\n**When to use:** If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\n**When to use:** If you already know how many groups you want."
 )
 
 if clustering_method == "Community Detection":
