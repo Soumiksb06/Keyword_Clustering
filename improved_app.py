@@ -39,7 +39,8 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Community Detection", "Agglomerative", "K-means"]
+    ["Community Detection", "Agglomerative", "K-means"],
+    help="Community Detection: Best for discovering organic clusters with varying sizes.\nAgglomerative: Useful for hierarchical clustering with a defined distance threshold.\nK-means: Effective when you have a predefined number of clusters."
 )
 
 if clustering_method == "Community Detection":
@@ -50,7 +51,11 @@ elif clustering_method == "Agglomerative":
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
 
-transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
+transformer = st.selectbox(
+    "Select Transformer Model",
+    ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
+    help="all-MiniLM-L6-v2: Lightweight and fast, suitable for small datasets.\nall-mpnet-base-v2: Balanced between performance and speed, good for medium-sized datasets.\nparaphrase-mpnet-base-v2: High accuracy, ideal for large datasets and detailed analysis."
+)
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
