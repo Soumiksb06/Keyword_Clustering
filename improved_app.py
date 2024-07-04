@@ -75,9 +75,9 @@ if uploaded_file:
         
         if uploaded_file.name.endswith('.csv'):
             delimiter_type = detect(firstline)
-            df = pd.read_csv(uploaded_file, encoding=encoding_type, delimiter=delimiter_type or ',')
+            df = pd.read_csv(uploaded_file, encoding=encoding_type, delimiter=delimiter_type or ',').dropna()
         elif uploaded_file.name.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
+            df = pd.read_excel(uploaded_file, engine='openpyxl').dropna()
 
         st.write("File loaded successfully!")
         st.write(f"Detected encoding: '{encoding_type}'")
