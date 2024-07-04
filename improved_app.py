@@ -36,6 +36,7 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
+st.write("**Note:** The dataset must contain a column named 'Keyword', 'keywords', 'query', 'Top queries', 'queries', or 'Search terms report'.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
@@ -54,7 +55,7 @@ elif clustering_method == "K-means":
 transformer = st.selectbox(
     "Select Transformer Model",
     ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
-    help="all-MiniLM-L6-v2: Lightweight and fast, suitable for small datasets.\nall-mpnet-base-v2: Balanced between performance and speed, good for medium-sized datasets.\nparaphrase-mpnet-base-v2: High accuracy, ideal for large datasets and detailed analysis."
+    help="all-MiniLM-L6-v2: Lightweight and fast, suitable for small datasets.\n\nall-mpnet-base-v2: Balanced between performance and speed, good for medium-sized datasets.\n\nparaphrase-mpnet-base-v2: High accuracy, ideal for large datasets and detailed analysis."
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
