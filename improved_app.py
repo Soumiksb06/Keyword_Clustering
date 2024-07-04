@@ -41,23 +41,23 @@ st.write("**Note:** The dataset must contain a column named 'Keyword', 'keywords
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
     ["Community Detection", "Agglomerative", "K-means"],
-    help="**Community Detection:** Finds natural groups in your data.\n\nWhen to use: If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
+    help="**Community Detection:** Finds natural groups in your data.\n\n**When to use:** If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\n**When to use:** If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\n**When to use:** If you already know how many groups you want."
 )
 
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-    st.write("**Tip:** Increase the cluster accuracy if clusters seem too large or unrelated keywords are grouped together. Decrease it if clusters are too small or numerous.")
+    st.write("**Tip:** If the groups are too big or mixed, increase the accuracy. If the groups are too small or too many, decrease the accuracy.")
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
-    st.write("**Tip:** Increase the distance threshold to form fewer, larger clusters. Decrease it to form more, smaller clusters.")
+    st.write("**Tip:** Increase the threshold for fewer, bigger groups. Decrease it for more, smaller groups.")
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
 
 transformer = st.selectbox(
     "Select Transformer Model",
     ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
-    help="**all-MiniLM-L6-v2:** Lightweight and fast, suitable for small datasets.\n\n**all-mpnet-base-v2:** Balanced between performance and speed, good for medium-sized datasets.\n\n**paraphrase-mpnet-base-v2:** High accuracy, ideal for large datasets and detailed analysis."
+    help="**all-MiniLM-L6-v2:** Fast and good for small datasets.\n\n**When to use:** If you have a small number of keywords.\n\n**all-mpnet-base-v2:** Balanced and good for medium datasets.\n\n**When to use:** If you have a medium number of keywords.\n\n**paraphrase-mpnet-base-v2:** Very accurate and good for large datasets.\n\n**When to use:** If you have a large number of keywords."
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
@@ -98,7 +98,7 @@ if uploaded_file:
             df['Keyword'] = df['Keyword'].astype(str)
             
             st.write("Sample of the data (first 5 rows):")
-            st.write(df['Keyword'].head())
+            st.write(df.head())
 
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
@@ -162,7 +162,7 @@ if uploaded_file:
                     for keyword, cluster in enumerate(clusters):
                         for sentence_id in cluster:
                             corpus_sentences_list.append(corpus_sentences[sentence_id])
-                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
+                            cluster_name_list.append(f"Cluster {keyword + 1}")
                 else:
                     for sentence_id, cluster_id in enumerate(cluster_labels):
                         corpus_sentences_list.append(corpus_sentences[sentence_id])
@@ -185,28 +185,79 @@ if uploaded_file:
                 df_new = pd.concat(df_all)
                 df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform(lambda x: ', '.join(x))
 
-                df['Length'] = df['Keyword'].astype(str).map(len)
-                df = df.sort_values(by="Length", ascending=True)
-                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
-                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
-                df = df.drop('Length', axis=1)
+                st.write("Clustered Keywords:")
+                st.write(df.groupby('Cluster Name')['Keyword'].apply(lambda x: ', '.join(x)))
 
-                df = df[['Cluster Name', 'Keyword']]
+                embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
 
-                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
+                if embeddings.shape[1] > 3:
+                    pca = PCA(n_components=3)
+                    embeddings_3d = pca.fit_transform(embeddings)
+                elif embeddings.shape[1] < 3:
+                    st.error("Error: Embeddings have fewer than 3 dimensions. Please choose a different model.")
+                    st.stop()
+                else:
+                    embeddings_3d = embeddings
 
-                st.write("Clustering completed successfully!")
-                st.write("Sample of the clustered data (first 10 rows):")
-                st.write(df.head(10))
+                embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
 
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download Clustered Keywords CSV",
-                    data=csv,
-                    file_name='clustered_keywords.csv',
-                    mime='text/csv',
+                colors = ['rgb({},{},{})'.format(
+                    int(r*255), 
+                    int(g*255), 
+                    int(b*255)
+                ) for r, g, b in embeddings_normalized]
+
+                fig_3d = go.Figure(data=[go.Scatter3d(
+                    x=embeddings_3d[:, 0],
+                    y=embeddings_3d[:, 1],
+                    z=embeddings_3d[:, 2],
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color=colors,
+                        opacity=0.8
+                    ),
+                    text=df['Keyword'],
+                    hoverinfo='text'
+                )])
+
+                fig_3d.update_layout(
+                    width=800,
+                    height=700,
+                    title='Keyword Embeddings in 3D Space',
+                    scene=dict(
+                        xaxis_title='Dimension 1',
+                        yaxis_title='Dimension 2',
+                        zaxis_title='Dimension 3'
+                    ),
+                    margin=dict(l=0, r=0, b=0, t=40)
                 )
+
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+                csv_data_clustered = df.groupby('Cluster Name')['Keyword'].apply(lambda x: ', '.join(x)).reset_index()
+                csv_data_clustered.columns = ['Cluster', 'Keywords']
+
+                st.write(csv_data_clustered)
+
+                if remaining > 0:
+                    st.write("Unclustered Keywords:")
+                    st.write(list(corpus_set))
+                    
+                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
+                    
+                    csv_data_unclustered = unclustered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Unclustered Keywords",
+                        data=csv_data_unclustered,
+                        file_name="Unclustered_Keywords.csv",
+                        mime="text/csv"
+                    )
+
+    except pd.errors.EmptyDataError:
+        st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
-        st.error(f"An error occurred while processing the file: {e}")
+        st.error(f"An unexpected error occurred: {e}")
+        st.error("Please check your data and try again.")
