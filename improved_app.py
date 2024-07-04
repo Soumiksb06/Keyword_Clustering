@@ -40,7 +40,7 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
     ["Community Detection", "Agglomerative", "K-means"],
-    help="Community Detection: Best for discovering organic clusters with varying sizes.\nAgglomerative: Useful for hierarchical clustering with a defined distance threshold.\nK-means: Effective when you have a predefined number of clusters."
+    help="**Community Detection:** Finds natural groups in your data.\n\nWhen to use: If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
 )
 
 if clustering_method == "Community Detection":
@@ -54,7 +54,7 @@ elif clustering_method == "K-means":
 transformer = st.selectbox(
     "Select Transformer Model",
     ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
-    help="all-MiniLM-L6-v2: Lightweight and fast, suitable for small datasets.\nall-mpnet-base-v2: Balanced between performance and speed, good for medium-sized datasets.\nparaphrase-mpnet-base-v2: High accuracy, ideal for large datasets and detailed analysis."
+    help="**all-MiniLM-L6-v2:** Fast and good for small datasets.\n\nWhen to use: If you have a small number of keywords.\n\n**all-mpnet-base-v2:** Balanced and good for medium datasets.\n\nWhen to use: If you have a medium number of keywords.\n\n**paraphrase-mpnet-base-v2:** Very accurate and good for large datasets.\n\nWhen to use: If you have a large number of keywords."
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
