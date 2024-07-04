@@ -47,8 +47,10 @@ clustering_method = st.sidebar.selectbox(
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+    st.write("**Tip:** Increase the cluster accuracy if clusters seem too large or unrelated keywords are grouped together. Decrease it if clusters are too small or numerous.")
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
+    st.write("**Tip:** Increase the distance threshold to form fewer, larger clusters. Decrease it to form more, smaller clusters.")
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
 
@@ -195,99 +197,16 @@ if uploaded_file:
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
-                uncluster_percent = (remaining / len(df)) * 100
-                clustered_percent = 100 - uncluster_percent
-                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
-                st.write(f"Number of iterations: {iterations}")
-                st.write(f"Total unclustered keywords: {remaining}")
+                st.write("Clustering completed successfully!")
+                st.write("Sample of the clustered data (first 10 rows):")
+                st.write(df.head(10))
 
-                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
-
-                if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
-                    cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
-                    overall_coherence = np.mean(cluster_coherences)
-
-                    st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
-                    st.write("Cluster Coherences:")
-                    for i, coherence in enumerate(cluster_coherences):
-                        st.write(f"Cluster {i+1}: {coherence:.4f}")
-
-                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
-                result_df.columns = ['Cluster', 'Keywords']
-
-                st.write(result_df)
-
-                embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
-
-                if embeddings.shape[1] > 3:
-                    pca = PCA(n_components=3)
-                    embeddings_3d = pca.fit_transform(embeddings)
-                elif embeddings.shape[1] < 3:
-                    st.error("Error: Embeddings have fewer than 3 dimensions. Please choose a different model.")
-                    st.stop()
-                else:
-                    embeddings_3d = embeddings
-
-                embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
-
-                colors = ['rgb({},{},{})'.format(
-                    int(r*255), 
-                    int(g*255), 
-                    int(b*255)
-                ) for r, g, b in embeddings_normalized]
-
-                fig_3d = go.Figure(data=[go.Scatter3d(
-                    x=embeddings_3d[:, 0],
-                    y=embeddings_3d[:, 1],
-                    z=embeddings_3d[:, 2],
-                    mode='markers',
-                    marker=dict(
-                        size=5,
-                        color=colors,
-                        opacity=0.8
-                    ),
-                    text=df['Keyword'],
-                    hoverinfo='text'
-                )])
-
-                fig_3d.update_layout(
-                    width=800,
-                    height=700,
-                    title='Keyword Embeddings in 3D Space',
-                    scene=dict(
-                        xaxis_title='Dimension 1',
-                        yaxis_title='Dimension 2',
-                        zaxis_title='Dimension 3'
-                    ),
-                    margin=dict(l=0, r=0, b=0, t=40)
-                )
-
-                st.plotly_chart(fig_3d, use_container_width=True)
-
-                csv_data_clustered = result_df.to_csv(index=False)
+                csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="Download Clustered Keywords",
-                    data=csv_data_clustered,
-                    file_name="Clustered_Keywords.csv",
-                    mime="text/csv"
+                    label="Download Clustered Keywords CSV",
+                    data=csv,
+                    file_name='clustered_keywords.csv',
+                    mime='text/csv',
                 )
-
-                if remaining > 0:
-                    st.write("Unclustered Keywords:")
-                    st.write(list(corpus_set))
-                    
-                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
-                    
-                    csv_data_unclustered = unclustered_df.to_csv(index=False)
-                    st.download_button(
-                        label="Download Unclustered Keywords",
-                        data=csv_data_unclustered,
-                        file_name="Unclustered_Keywords.csv",
-                        mime="text/csv"
-                    )
-
-    except pd.errors.EmptyDataError:
-        st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        st.error("Please check your data and try again.")
+        st.error(f"An error occurred while processing the file: {e}")
