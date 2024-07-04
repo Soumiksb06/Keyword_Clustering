@@ -9,3 +9,4 @@ plotly
 openpyxl
 hdbscan
 langdetect
+iso-639
