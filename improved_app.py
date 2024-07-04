@@ -179,7 +179,6 @@ if uploaded_file:
 
                 df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
-                # Reintroduce cluster renaming
                 df['Length'] = df['Keyword'].astype(str).map(len)
                 df = df.sort_values(by="Length", ascending=True)
                 df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
@@ -212,10 +211,8 @@ if uploaded_file:
 
                 st.write(result_df)
 
-                # Generate embeddings for visualization
                 embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
 
-                # Reduce to 3D using PCA if necessary
                 if embeddings.shape[1] > 3:
                     pca = PCA(n_components=3)
                     embeddings_3d = pca.fit_transform(embeddings)
@@ -225,17 +222,14 @@ if uploaded_file:
                 else:
                     embeddings_3d = embeddings
 
-                # Normalize the embeddings to [0, 1] range for coloring
                 embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
 
-                # Create a color scale based on the normalized embeddings
                 colors = ['rgb({},{},{})'.format(
                     int(r*255), 
                     int(g*255), 
                     int(b*255)
                 ) for r, g, b in embeddings_normalized]
 
-                # Create the 3D scatter plot
                 fig_3d = go.Figure(data=[go.Scatter3d(
                     x=embeddings_3d[:, 0],
                     y=embeddings_3d[:, 1],
@@ -250,7 +244,6 @@ if uploaded_file:
                     hoverinfo='text'
                 )])
 
-                # Update layout for 3D scatter plot
                 fig_3d.update_layout(
                     width=800,
                     height=700,
@@ -263,7 +256,6 @@ if uploaded_file:
                     margin=dict(l=0, r=0, b=0, t=40)
                 )
 
-                # Display 3D scatter plot using Streamlit
                 st.plotly_chart(fig_3d, use_container_width=True)
 
                 csv_data_clustered = result_df.to_csv(index=False)
