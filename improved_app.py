@@ -47,17 +47,17 @@ clustering_method = st.sidebar.selectbox(
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-    st.write("**Tip:** If the groups are too big or mixed, increase the accuracy. If the groups are too small or too many, decrease the accuracy.")
+    st.write("**Tip:** Increase the cluster accuracy if clusters seem too large or unrelated keywords are grouped together. Decrease it if clusters are too small or numerous.")
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
-    st.write("**Tip:** Increase the threshold for fewer, bigger groups. Decrease it for more, smaller groups.")
+    st.write("**Tip:** Increase the distance threshold to form fewer, larger clusters. Decrease it to form more, smaller clusters.")
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
 
 transformer = st.selectbox(
     "Select Transformer Model",
     ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'],
-    help="**all-MiniLM-L6-v2:** Fast and good for small datasets.\n\n**When to use:** If you have a small number of keywords.\n\n**all-mpnet-base-v2:** Balanced and good for medium datasets.\n\n**When to use:** If you have a medium number of keywords.\n\n**paraphrase-mpnet-base-v2:** Very accurate and good for large datasets.\n\n**When to use:** If you have a large number of keywords."
+    help="**all-MiniLM-L6-v2:** Lightweight and fast, suitable for small datasets.\n\n**all-mpnet-base-v2:** Balanced between performance and speed, good for medium-sized datasets.\n\n**paraphrase-mpnet-base-v2:** High accuracy, ideal for large datasets and detailed analysis."
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
@@ -98,7 +98,7 @@ if uploaded_file:
             df['Keyword'] = df['Keyword'].astype(str)
             
             st.write("Sample of the data (first 5 rows):")
-            st.write(df.head())
+            st.write(df['Keyword'].head())
 
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
@@ -185,8 +185,28 @@ if uploaded_file:
                 df_new = pd.concat(df_all)
                 df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-                st.write("Clustered Keywords:")
-                st.write(df.groupby('Cluster Name')['Keyword'].apply(lambda x: ', '.join(x)))
+                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df = df.drop('Length', axis=1)
+
+                df = df[['Cluster Name', 'Keyword']]
+
+                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
+
+                st.write("Clustering completed successfully!")
+                st.write("Sample of the clustered data (first 10 rows):")
+                st.write(df.head(10))
+
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download Clustered Keywords CSV",
+                    data=csv,
+                    file_name='clustered_keywords.csv',
+                    mime='text/csv',
+                )
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"An error occurred while processing the file: {e}")
