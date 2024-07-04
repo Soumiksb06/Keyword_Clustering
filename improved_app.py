@@ -98,7 +98,7 @@ if uploaded_file:
             df['Keyword'] = df['Keyword'].astype(str)
             
             st.write("Sample of the data (first 5 rows):")
-            st.write(df.head())
+            st.write(df['Keyword'].head())
 
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
