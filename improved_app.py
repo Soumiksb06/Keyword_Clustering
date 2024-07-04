@@ -10,6 +10,7 @@ from sklearn.cluster import AgglomerativeClustering, KMeans
 import torch
 from sklearn.decomposition import PCA
 from langdetect import detect_langs
+from iso639 import languages
 
 def generate_colors(num_colors):
     colors = []
@@ -43,9 +44,13 @@ def detect_encoding(file):
 
 def detect_language(text):
     try:
-        return detect_langs(text)[0].lang
+        detected_langs = detect_langs(text)
+        main_language_code = detected_langs[0].lang
+        language_name = languages.get(part1=main_language_code).name
+        return language_name
     except:
-        return 'unknown'
+        return 'Unknown Language'
+
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
