@@ -95,7 +95,7 @@ if uploaded_file:
             df['Keyword'] = df['Keyword'].astype(str)
             
             st.write("Sample of the data (first 5 rows):")
-            st.write(df.head())
+            st.write(df['Keyword'].head())
 
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
@@ -250,8 +250,8 @@ if uploaded_file:
                 )])
 
                 fig_3d.update_layout(
-                    width=800,
-                    height=700,
+                    width=1200,
+                    height=675,
                     title='Keyword Embeddings in 3D Space',
                     scene=dict(
                         xaxis_title='Dimension 1',
