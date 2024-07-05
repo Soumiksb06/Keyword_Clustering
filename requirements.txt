@@ -10,3 +10,4 @@ openpyxl
 langdetect
 iso-639
 geopy
+spacy
