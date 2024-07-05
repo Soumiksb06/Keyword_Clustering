@@ -51,7 +51,7 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
-def post_process_clusters(df):
+def post_process_clusters(df, min_cluster_size):
     def split_name(name):
         parts = name.split()
         if len(parts) > 2 and parts[0].lower() == 'dr':
@@ -64,11 +64,18 @@ def post_process_clusters(df):
         if len(unique_names) > 1:
             for name in unique_names:
                 mask = group['Keyword'].apply(split_name) == name
-                new_cluster_name = f"{cluster_name} - {name}"
-                new_clusters.append(pd.DataFrame({
-                    'Cluster Name': new_cluster_name,
-                    'Keyword': group.loc[mask, 'Keyword']
-                }))
+                sub_group = group.loc[mask]
+                if len(sub_group) >= min_cluster_size:
+                    new_cluster_name = f"{cluster_name} - {name}"
+                    new_clusters.append(pd.DataFrame({
+                        'Cluster Name': new_cluster_name,
+                        'Keyword': sub_group['Keyword']
+                    }))
+                else:
+                    new_clusters.append(pd.DataFrame({
+                        'Cluster Name': cluster_name,
+                        'Keyword': sub_group['Keyword']
+                    }))
         else:
             new_clusters.append(group)
     
@@ -88,8 +95,10 @@ if clustering_method == "Community Detection":
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
 elif clustering_method == "K-means":
-    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=len(embeddings)-1, value=len(embeddings)/15)
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=15)
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
 
 transformer = st.selectbox(
     "Select Transformer Model",
@@ -228,7 +237,7 @@ if uploaded_file:
                 df = df[['Cluster Name', 'Keyword']]
 
                 # Apply post-processing to further split clusters
-                df = post_process_clusters(df)
+                df = post_process_clusters(df, min_cluster_size)
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
