@@ -58,23 +58,39 @@ def post_process_clusters(df, min_cluster_size):
     def clean_and_split(keyword):
         # Remove common prefixes and suffixes
         keyword = re.sub(r'^(dr\.?|doctor)\s+', '', keyword, flags=re.IGNORECASE)
-        keyword = re.sub(r'\s+(fees|hospital)$', '', keyword, flags=re.IGNORECASE)
+        keyword = re.sub(r'\s+(fees|hospital|clinic)$', '', keyword, flags=re.IGNORECASE)
         
         parts = keyword.lower().split()
-        name = ' '.join(parts[:2])  # First two words as name
-        location = ' '.join(parts[2:])  # Rest as location
+        
+        # Consider up to three words for name
+        name_parts = parts[:min(3, len(parts))]
+        name = ' '.join(name_parts)
+        
+        # Everything else is considered location/additional info
+        location = ' '.join(parts[len(name_parts):])
         
         return name.strip(), location.strip()
 
+    def are_names_similar(name1, name2):
+        # Split names into parts
+        parts1 = set(name1.split())
+        parts2 = set(name2.split())
+        
+        # Check if they share at least one name part
+        return len(parts1.intersection(parts2)) > 0
+
     new_clusters = []
     for cluster_name, group in df.groupby('Cluster Name'):
-        unique_combinations = group['Keyword'].apply(clean_and_split).unique()
-        if len(unique_combinations) > 1:
-            for name, location in unique_combinations:
-                mask = group['Keyword'].apply(lambda x: clean_and_split(x) == (name, location))
+        name_location_pairs = group['Keyword'].apply(clean_and_split)
+        unique_names = set(pair[0] for pair in name_location_pairs)
+        
+        for name in unique_names:
+            similar_names = [n for n in unique_names if are_names_similar(name, n)]
+            for similar_name in similar_names:
+                mask = name_location_pairs.apply(lambda x: are_names_similar(x[0], similar_name))
                 sub_group = group.loc[mask]
                 if len(sub_group) >= min_cluster_size:
-                    new_cluster_name = f"{cluster_name} - {name} {location}".strip()
+                    new_cluster_name = f"{cluster_name} - {similar_name}"
                     new_clusters.append(pd.DataFrame({
                         'Cluster Name': new_cluster_name,
                         'Keyword': sub_group['Keyword']
@@ -84,8 +100,6 @@ def post_process_clusters(df, min_cluster_size):
                         'Cluster Name': cluster_name,
                         'Keyword': sub_group['Keyword']
                     }))
-        else:
-            new_clusters.append(group)
     
     return pd.concat(new_clusters).reset_index(drop=True)
 
