@@ -52,8 +52,6 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
-import re
-
 def post_process_clusters(df, min_cluster_size):
     def clean_and_split(keyword):
         # Remove common prefixes and suffixes
@@ -76,8 +74,8 @@ def post_process_clusters(df, min_cluster_size):
         parts1 = set(name1.split())
         parts2 = set(name2.split())
         
-        # Check if they share at least one name part
-        return len(parts1.intersection(parts2)) > 0
+        # Check if they share at least two name part
+        return len(parts1.intersection(parts2)) > 1
 
     new_clusters = []
     for cluster_name, group in df.groupby('Cluster Name'):
