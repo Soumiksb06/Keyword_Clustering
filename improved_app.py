@@ -11,6 +11,8 @@ import torch
 from sklearn.decomposition import PCA
 from langdetect import detect_langs
 from iso639 import languages
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 def generate_colors(num_colors):
     colors = []
@@ -51,6 +53,22 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
+def detect_location(keyword):
+    geolocator = Nominatim(user_agent="geoapiExercises")
+    try:
+        location = geolocator.geocode(keyword, exactly_one=True, timeout=10)
+        if location:
+            return True
+    except (GeocoderTimedOut, GeocoderServiceError):
+        return False
+    return False
+
+def extract_locations(keywords):
+    location_keywords = []
+    for keyword in keywords:
+        if detect_location(keyword):
+            location_keywords.append(keyword)
+    return location_keywords
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
@@ -63,7 +81,7 @@ clustering_method = st.sidebar.selectbox(
 
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
-    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=5)
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
 elif clustering_method == "K-means":
@@ -130,7 +148,7 @@ if uploaded_file:
                 
                 if len(corpus_embeddings.shape) == 1:
                     corpus_embeddings = corpus_embeddings.reshape(1, -1)
-                
+
                 if clustering_method == "Community Detection":
                     clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
                     cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
@@ -143,7 +161,7 @@ if uploaded_file:
                             distances = torch.norm(cluster_embeddings - centroid, dim=1)
                             coherence = 1 / (1 + torch.mean(distances).item())
                             coherences.append(coherence)
-                    
+
                     if coherences:
                         overall_coherence = np.mean(coherences)
                         st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
@@ -152,7 +170,11 @@ if uploaded_file:
                             cluster_keywords = [corpus_sentences[i] for i in cluster]
                             cluster_name = min(cluster_keywords, key=len)
                             st.write(f"{cluster_name}: {coherence:.4f}")
-                    
+
+                    if overall_coherence < 0.6 and min_cluster_size > 1:
+                        min_cluster_size -= 1
+                        continue
+
                 elif clustering_method == "Agglomerative":
                     max_clusters = len(corpus_sentences) // 4
                     while True:
@@ -207,104 +229,49 @@ if uploaded_file:
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
-                uncluster_percent = (remaining / len(df)) * 100
-                clustered_percent = 100 - uncluster_percent
-                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
-                st.write(f"Number of iterations: {iterations}")
-                st.write(f"Total unclustered keywords: {remaining}")
+                num_clusters = df['Cluster Name'].nunique()
+                colors = generate_colors(num_clusters)
+                color_map = {cluster: f'rgb{colors[i]}' for i, cluster in enumerate(df['Cluster Name'].unique())}
 
-                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+                df['Color'] = df['Cluster Name'].map(color_map)
 
-                if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
-                    cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
-                    overall_coherence = np.mean(cluster_coherences)
+                fig = go.Figure(data=[
+                    go.Scatter(
+                        x=df[df['Cluster Name'] == cluster]['Keyword'].index,
+                        y=[0] * len(df[df['Cluster Name'] == cluster]['Keyword']),
+                        mode='markers',
+                        marker=dict(color=color_map[cluster], size=10),
+                        text=df[df['Cluster Name'] == cluster]['Keyword'],
+                        name=cluster
+                    ) for cluster in df['Cluster Name'].unique()
+                ])
 
-                    st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
-                    st.write("Cluster Coherences:")
-                    cluster_names = df.groupby('Cluster Name')['Keyword'].first()
-                    for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
-                        st.write(f"{cluster_name}: {coherence:.4f}")
-
-                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
-                result_df.columns = ['Cluster', 'Keywords']
-
-                st.write(result_df)
-
-                embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
-
-                if embeddings.shape[1] > 3:
-                    pca = PCA(n_components=3)
-                    embeddings_3d = pca.fit_transform(embeddings)
-                elif embeddings.shape[1] < 3:
-                    st.error("Error: Embeddings have fewer than 3 dimensions. Please choose a different model.")
-                    st.stop()
-                else:
-                    embeddings_3d = embeddings
-
-                embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
-
-                colors = ['rgb({},{},{})'.format(
-                    int(r*255), 
-                    int(g*255), 
-                    int(b*255)
-                ) for r, g, b in embeddings_normalized]
-
-                fig_3d = go.Figure(data=[go.Scatter3d(
-                    x=embeddings_3d[:, 0],
-                    y=embeddings_3d[:, 1],
-                    z=embeddings_3d[:, 2],
-                    mode='markers',
-                    marker=dict(
-                        size=5,
-                        color=colors,
-                        opacity=0.8
-                    ),
-                    text=df['Keyword'],
-                    hoverinfo='text'
-                )])
-
-                fig_3d.update_layout(
-                    width=1200,
-                    height=675,
-                    title='Keyword Embeddings in 3D Space',
-                    scene=dict(
-                        xaxis_title='Dimension 1',
-                        yaxis_title='Dimension 2',
-                        zaxis_title='Dimension 3'
-                    ),
-                    margin=dict(l=0, r=0, b=0, t=40)
+                fig.update_layout(
+                    title="Keyword Clusters",
+                    xaxis_title="Keywords",
+                    yaxis_title="",
+                    showlegend=True,
+                    yaxis=dict(showticklabels=False),
+                    xaxis=dict(showticklabels=False)
                 )
 
-                st.plotly_chart(fig_3d, use_container_width=True)
-                with st.expander("ℹ️ About this visualization"):
-                    st.write("The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts. This visualization works for multiple languages.")
-                
-                csv_data_clustered = result_df.to_csv(index=False)
+                st.plotly_chart(fig)
+
+                location_keywords = extract_locations(df['Keyword'].unique())
+                st.write(f"Detected {len(location_keywords)} location-related keywords out of {df['Keyword'].nunique()} unique keywords:")
+                st.write(location_keywords)
+
+                @st.cache
+                def convert_df_to_csv(df):
+                    return df.to_csv(index=False).encode('utf-8')
+
+                csv = convert_df_to_csv(df)
                 st.download_button(
-                    label="Download Clustered Keywords",
-                    data=csv_data_clustered,
-                    file_name="Clustered_Keywords.csv",
-                    mime="text/csv"
+                    label="Download clustered data as CSV",
+                    data=csv,
+                    file_name='clustered_keywords.csv',
+                    mime='text/csv',
                 )
 
-                if remaining > 0:
-                    st.write("Unclustered Keywords:")
-                    st.write(list(corpus_set))
-                    
-                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
-                    
-                    csv_data_unclustered = unclustered_df.to_csv(index=False)
-                    st.download_button(
-                        label="Download Unclustered Keywords",
-                        data=csv_data_unclustered,
-                        file_name="Unclustered_Keywords.csv",
-                        mime="text/csv"
-                    )
-
-                st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
-
-    except pd.errors.EmptyDataError:
-        st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        st.error("Please check your data and try again.")
+        st.error(f"An error occurred: {e}")
