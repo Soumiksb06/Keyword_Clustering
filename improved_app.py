@@ -65,7 +65,7 @@ if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 99, 90) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
 elif clustering_method == "Agglomerative":
-    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1, step=0.1)
+    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=len(embeddings)-1, value=len(embeddings)/15)
 
