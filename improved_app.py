@@ -13,6 +13,9 @@ from langdetect import detect_langs
 from iso639 import languages
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+import spacy
+
+nlp = spacy.load('en_core_web_sm')
 
 def generate_colors(num_colors):
     colors = []
@@ -70,6 +73,15 @@ def extract_locations(keywords):
             location_keywords.append(keyword)
     return location_keywords
 
+def extract_names(keywords):
+    names = []
+    for keyword in keywords:
+        doc = nlp(keyword)
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                names.append(ent.text)
+    return names
+
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
@@ -80,7 +92,7 @@ clustering_method = st.sidebar.selectbox(
 )
 
 if clustering_method == "Community Detection":
-    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 90) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=5)
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
@@ -191,13 +203,15 @@ if uploaded_file:
                     cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
                 if clustering_method == "Community Detection":
-                    for keyword, cluster in enumerate(clusters):
+                    for cluster_id, cluster in enumerate(clusters):
                         for sentence_id in cluster:
                             corpus_sentences_list.append(corpus_sentences[sentence_id])
-                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
+                        cluster_name_list.append(f"Cluster {cluster_id + 1}")
                 else:
-                    for sentence_id, cluster_id in enumerate(cluster_labels):
-                        corpus_sentences_list.append(corpus_sentences[sentence_id])
+                    for cluster_id in range(len(np.unique(cluster_labels))):
+                        cluster_indices = np.where(cluster_labels == cluster_id)[0]
+                        for sentence_id in cluster_indices:
+                            corpus_sentences_list.append(corpus_sentences[sentence_id])
                         cluster_name_list.append(f"Cluster {cluster_id + 1}")
 
                 df_new = pd.DataFrame({'Cluster Name': cluster_name_list, 'Keyword': corpus_sentences_list})
@@ -261,7 +275,11 @@ if uploaded_file:
                 st.write(f"Detected {len(location_keywords)} location-related keywords out of {df['Keyword'].nunique()} unique keywords:")
                 st.write(location_keywords)
 
-                @st.cache
+                person_names = extract_names(df['Keyword'].unique())
+                st.write(f"Detected {len(person_names)} names out of {df['Keyword'].nunique()} unique keywords:")
+                st.write(person_names)
+
+                @st.cache_data
                 def convert_df_to_csv(df):
                     return df.to_csv(index=False).encode('utf-8')
 
