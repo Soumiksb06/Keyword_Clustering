@@ -51,6 +51,28 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
+def post_process_clusters(df):
+    def split_name(name):
+        parts = name.split()
+        if len(parts) > 2 and parts[0].lower() == 'dr':
+            return ' '.join(parts[1:])
+        return name
+
+    new_clusters = []
+    for cluster_name, group in df.groupby('Cluster Name'):
+        unique_names = group['Keyword'].apply(split_name).unique()
+        if len(unique_names) > 1:
+            for name in unique_names:
+                mask = group['Keyword'].apply(split_name) == name
+                new_cluster_name = f"{cluster_name} - {name}"
+                new_clusters.append(pd.DataFrame({
+                    'Cluster Name': new_cluster_name,
+                    'Keyword': group.loc[mask, 'Keyword']
+                }))
+        else:
+            new_clusters.append(group)
+    
+    return pd.concat(new_clusters).reset_index(drop=True)
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
@@ -204,6 +226,9 @@ if uploaded_file:
                 df = df.drop('Length', axis=1)
 
                 df = df[['Cluster Name', 'Keyword']]
+
+                # Apply post-processing to further split clusters
+                df = post_process_clusters(df)
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
