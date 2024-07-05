@@ -168,7 +168,7 @@ if uploaded_file:
                         if n_clusters <= max_clusters:
                             break
                         distance_threshold += 0.1
-                    st.write(f"Adjusted distance threshold: {distance_threshold:.2f")
+                    st.write(f"Adjusted distance threshold: {distance_threshold:.2f"})
                     st.write(f"Number of clusters formed: {n_clusters}")
                 elif clustering_method == "K-means":
                     clustering_model = KMeans(n_clusters=n_clusters)
