@@ -52,21 +52,25 @@ def detect_language(text):
         return 'Unknown Language'
 
 def post_process_clusters(df, min_cluster_size):
-    def split_name(name):
-        parts = name.split()
-        if len(parts) > 2 and parts[0].lower() == 'dr':
-            return ' '.join(parts[1:])
-        return name
+    def split_name_and_location(keyword):
+        parts = keyword.lower().split()
+        if len(parts) > 2 and parts[0] == 'dr':
+            name = ' '.join(parts[1:3])  # Combine first and last name
+            location = ' '.join(parts[3:])  # Everything after the name is considered location
+        else:
+            name = ' '.join(parts[:2])  # Take first two words as name
+            location = ' '.join(parts[2:])  # Everything else is location
+        return name, location
 
     new_clusters = []
     for cluster_name, group in df.groupby('Cluster Name'):
-        unique_names = group['Keyword'].apply(split_name).unique()
-        if len(unique_names) > 1:
-            for name in unique_names:
-                mask = group['Keyword'].apply(split_name) == name
+        unique_combinations = group['Keyword'].apply(split_name_and_location).unique()
+        if len(unique_combinations) > 1:
+            for name, location in unique_combinations:
+                mask = group['Keyword'].apply(lambda x: split_name_and_location(x) == (name, location))
                 sub_group = group.loc[mask]
                 if len(sub_group) >= min_cluster_size:
-                    new_cluster_name = f"{cluster_name} - {name}"
+                    new_cluster_name = f"{cluster_name} - {name} {location}".strip()
                     new_clusters.append(pd.DataFrame({
                         'Cluster Name': new_cluster_name,
                         'Keyword': sub_group['Keyword']
