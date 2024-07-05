@@ -11,6 +11,7 @@ import torch
 from sklearn.decomposition import PCA
 from langdetect import detect_langs
 from iso639 import languages
+import re
 
 def generate_colors(num_colors):
     colors = []
@@ -51,23 +52,26 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
+import re
+
 def post_process_clusters(df, min_cluster_size):
-    def split_name_and_location(keyword):
+    def clean_and_split(keyword):
+        # Remove common prefixes and suffixes
+        keyword = re.sub(r'^(dr\.?|doctor)\s+', '', keyword, flags=re.IGNORECASE)
+        keyword = re.sub(r'\s+(fees|hospital)$', '', keyword, flags=re.IGNORECASE)
+        
         parts = keyword.lower().split()
-        if len(parts) > 2 and parts[0] == 'dr':
-            name = ' '.join(parts[1:3])  # Combine first and last name
-            location = ' '.join(parts[3:])  # Everything after the name is considered location
-        else:
-            name = ' '.join(parts[:2])  # Take first two words as name
-            location = ' '.join(parts[2:])  # Everything else is location
-        return name, location
+        name = ' '.join(parts[:2])  # First two words as name
+        location = ' '.join(parts[2:])  # Rest as location
+        
+        return name.strip(), location.strip()
 
     new_clusters = []
     for cluster_name, group in df.groupby('Cluster Name'):
-        unique_combinations = group['Keyword'].apply(split_name_and_location).unique()
+        unique_combinations = group['Keyword'].apply(clean_and_split).unique()
         if len(unique_combinations) > 1:
             for name, location in unique_combinations:
-                mask = group['Keyword'].apply(lambda x: split_name_and_location(x) == (name, location))
+                mask = group['Keyword'].apply(lambda x: clean_and_split(x) == (name, location))
                 sub_group = group.loc[mask]
                 if len(sub_group) >= min_cluster_size:
                     new_cluster_name = f"{cluster_name} - {name} {location}".strip()
