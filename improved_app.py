@@ -63,7 +63,7 @@ clustering_method = st.sidebar.selectbox(
 
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
-    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=5)
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
 elif clustering_method == "K-means":
@@ -152,6 +152,12 @@ if uploaded_file:
                             cluster_keywords = [corpus_sentences[i] for i in cluster]
                             cluster_name = min(cluster_keywords, key=len)
                             st.write(f"{cluster_name}: {coherence:.4f}")
+
+                        # Adjust min_cluster_size if necessary
+                        if any(coherence < 0.5 for coherence in coherences) or check_len > len(corpus_set):
+                            min_cluster_size -= 1
+                            if min_cluster_size < 1:
+                                break
                     
                 elif clustering_method == "Agglomerative":
                     max_clusters = len(corpus_sentences) // 4
@@ -162,7 +168,7 @@ if uploaded_file:
                         if n_clusters <= max_clusters:
                             break
                         distance_threshold += 0.1
-                    st.write(f"Adjusted distance threshold: {distance_threshold:.2f}")
+                    st.write(f"Adjusted distance threshold: {distance_threshold:.2f")
                     st.write(f"Number of clusters formed: {n_clusters}")
                 elif clustering_method == "K-means":
                     clustering_model = KMeans(n_clusters=n_clusters)
