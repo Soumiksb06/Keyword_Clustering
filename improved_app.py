@@ -52,64 +52,54 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
-def clean_and_split(keyword):
-    # Remove common prefixes and suffixes
-    keyword = re.sub(r'^(dr\.?|doctor|prof\.?|professor)\s+', '', keyword, flags=re.IGNORECASE)
-    keyword = re.sub(r'\s+(fees|hospital|clinic|center|centre)$', '', keyword, flags=re.IGNORECASE)
-    
-    # Remove punctuation and extra spaces
-    keyword = re.sub(r'[^\w\s]', '', keyword)
-    keyword = ' '.join(keyword.split())
-    
-    parts = keyword.lower().split()
-    
-    # Consider up to three words for name
-    name_parts = parts[:min(3, len(parts))]
-    name = ' '.join(name_parts)
-    
-    # Everything else is considered location/additional info
-    location = ' '.join(parts[len(name_parts):])
-    
-    return name.strip(), location.strip()
-
-def are_names_similar(name1, name2):
-    parts1 = set(name1.split())
-    parts2 = set(name2.split())
-    
-    # Calculate Jaccard similarity
-    similarity = len(parts1.intersection(parts2)) / len(parts1.union(parts2))
-    
-    # Require at least 50% similarity and at least one shared word
-    return similarity >= 0.5 and len(parts1.intersection(parts2)) > 0
+import re
 
 def post_process_clusters(df, min_cluster_size):
+    def clean_and_split(keyword):
+        # Remove common prefixes and suffixes
+        keyword = re.sub(r'^(dr\.?|doctor)\s+', '', keyword, flags=re.IGNORECASE)
+        keyword = re.sub(r'\s+(fees|hospital|clinic)$', '', keyword, flags=re.IGNORECASE)
+        
+        parts = keyword.lower().split()
+        
+        # Consider up to three words for name
+        name_parts = parts[:min(3, len(parts))]
+        name = ' '.join(name_parts)
+        
+        # Everything else is considered location/additional info
+        location = ' '.join(parts[len(name_parts):])
+        
+        return name.strip(), location.strip()
+
+    def are_names_similar(name1, name2):
+        # Split names into parts
+        parts1 = set(name1.split())
+        parts2 = set(name2.split())
+        
+        # Check if they share at least one name part
+        return len(parts1.intersection(parts2)) > 0
+
     new_clusters = []
     for cluster_name, group in df.groupby('Cluster Name'):
         name_location_pairs = group['Keyword'].apply(clean_and_split)
         unique_names = set(pair[0] for pair in name_location_pairs)
         
-        processed_names = set()
         for name in unique_names:
-            if name in processed_names:
-                continue
-            
             similar_names = [n for n in unique_names if are_names_similar(name, n)]
-            processed_names.update(similar_names)
-            
-            mask = name_location_pairs.apply(lambda x: any(are_names_similar(x[0], n) for n in similar_names))
-            sub_group = group.loc[mask]
-            
-            if len(sub_group) >= min_cluster_size:
-                new_cluster_name = f"{cluster_name} - {name}"
-                new_clusters.append(pd.DataFrame({
-                    'Cluster Name': new_cluster_name,
-                    'Keyword': sub_group['Keyword']
-                }))
-            else:
-                new_clusters.append(pd.DataFrame({
-                    'Cluster Name': cluster_name,
-                    'Keyword': sub_group['Keyword']
-                }))
+            for similar_name in similar_names:
+                mask = name_location_pairs.apply(lambda x: are_names_similar(x[0], similar_name))
+                sub_group = group.loc[mask]
+                if len(sub_group) >= min_cluster_size:
+                    new_cluster_name = f"{cluster_name} - {similar_name}"
+                    new_clusters.append(pd.DataFrame({
+                        'Cluster Name': new_cluster_name,
+                        'Keyword': sub_group['Keyword']
+                    }))
+                else:
+                    new_clusters.append(pd.DataFrame({
+                        'Cluster Name': cluster_name,
+                        'Keyword': sub_group['Keyword']
+                    }))
     
     return pd.concat(new_clusters).reset_index(drop=True)
 
