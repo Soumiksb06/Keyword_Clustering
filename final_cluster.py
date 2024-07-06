@@ -11,6 +11,7 @@ import torch
 from sklearn.decomposition import PCA
 from langdetect import detect_langs
 from iso639 import languages
+import re
 
 def generate_colors(num_colors):
     colors = []
@@ -50,6 +51,15 @@ def detect_language(text):
         return language_name
     except:
         return 'Unknown Language'
+
+def extract_location(keyword):
+    location_patterns = [
+        r"\bchennai\b", r"\bpune\b", r"\bpatna\b", r"\bkannur\b", r"\bkerala\b", r"\btrivandrum\b"
+    ]
+    for pattern in location_patterns:
+        if re.search(pattern, keyword, re.IGNORECASE):
+            return re.search(pattern, keyword, re.IGNORECASE).group(0).capitalize()
+    return None
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
@@ -125,32 +135,19 @@ if uploaded_file:
                 if len(corpus_sentences) == 0:
                     break
 
-                # Encode the keywords
-                embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
-
-                # Adjust embeddings based on the presence of location indicators
-                location_keywords = ["city", "country", "location", "place", "region", "area"]  # Add more as needed
-                adjustment_factor = 1.5  # Adjust this factor as needed
-                adjusted_embeddings = []
-                for idx, keyword in enumerate(corpus_sentences):
-                    if any(loc_kw in keyword.lower() for loc_kw in location_keywords):
-                        adjusted_embedding = embeddings[idx] * adjustment_factor
-                    else:
-                        adjusted_embedding = embeddings[idx]
-                    adjusted_embeddings.append(adjusted_embedding)
-                adjusted_embeddings = torch.stack(adjusted_embeddings)
-
-                if len(adjusted_embeddings.shape) == 1:
-                    adjusted_embeddings = adjusted_embeddings.reshape(1, -1)
-
+                corpus_embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
+                
+                if len(corpus_embeddings.shape) == 1:
+                    corpus_embeddings = corpus_embeddings.reshape(1, -1)
+                
                 if clustering_method == "Community Detection":
-                    clusters = util.community_detection(adjusted_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
                     cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
                     
                     coherences = []
                     for cluster in clusters:
                         if len(cluster) > 1:
-                            cluster_embeddings = adjusted_embeddings[cluster]
+                            cluster_embeddings = corpus_embeddings[cluster]
                             centroid = torch.mean(cluster_embeddings, dim=0)
                             distances = torch.norm(cluster_embeddings - centroid, dim=1)
                             coherence = 1 / (1 + torch.mean(distances).item())
@@ -169,7 +166,7 @@ if uploaded_file:
                     max_clusters = len(corpus_sentences) // 4
                     while True:
                         clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
-                        cluster_labels = clustering_model.fit_predict(adjusted_embeddings.cpu().numpy())
+                        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
                         n_clusters = len(np.unique(cluster_labels))
                         if n_clusters <= max_clusters:
                             break
@@ -178,139 +175,148 @@ if uploaded_file:
                     st.write(f"Number of clusters formed: {n_clusters}")
                 elif clustering_method == "K-means":
                     clustering_model = KMeans(n_clusters=n_clusters)
-                    cluster_labels = clustering_model.fit_predict(adjusted_embeddings.cpu().numpy())
+                    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
                 if clustering_method == "Community Detection":
-                    new_clusters = []
-                    for cluster in clusters:
-                        if len(cluster) > 1:
-                            new_clusters.append([corpus_sentences[i] for i in cluster])
+                    for keyword, cluster in enumerate(clusters):
+                        for sentence_id in cluster:
+                            corpus_sentences_list.append(corpus_sentences[sentence_id])
+                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
                 else:
-                    new_clusters = []
-                    for label in np.unique(cluster_labels):
-                        cluster_indices = np.where(cluster_labels == label)[0]
-                        if len(cluster_indices) > 1:
-                            new_clusters.append([corpus_sentences[i] for i in cluster_indices])
-                
-                clusters = new_clusters
+                    for sentence_id, cluster_id in enumerate(cluster_labels):
+                        corpus_sentences_list.append(corpus_sentences[sentence_id])
+                        cluster_name_list.append(f"Cluster {cluster_id + 1}")
 
-                corpus_set = set(corpus_sentences)
-                df_cluster = pd.DataFrame(clusters).melt(var_name='Cluster', value_name='Keyword').dropna().drop('Cluster', axis=1)
-                df_cluster['Cluster Name'] = df_cluster['Keyword'].apply(lambda x: min([k for k in corpus_set_all if k in x], key=len))
-                df_all.append(df_cluster)
+                df_new = pd.DataFrame({'Cluster Name': cluster_name_list, 'Keyword': corpus_sentences_list})
 
-                cluster_name_list.append(df_cluster["Cluster Name"])
-                corpus_sentences_list.append(df_cluster["Keyword"])
-
-                corpus_set -= set(df_cluster['Keyword'])
-                iterations += 1
-                remaining = len(corpus_set)
-
-                if check_len == len(corpus_set):
-                    cluster = False
-
-            if len(corpus_set) > 0:
-                df_new = pd.DataFrame(corpus_set, columns=["Keyword"])
-                df_new['Cluster Name'] = "no_cluster"
                 df_all.append(df_new)
+                have = set(df_new["Keyword"])
 
-            df_all = pd.concat(df_all).reset_index(drop=True)
-            df_all = df_all.sort_values("Keyword")
+                corpus_set = corpus_set_all - have
+                remaining = len(corpus_set)
+                iterations += 1
+                if check_len == remaining:
+                    break
 
-            df = pd.merge(df, df_all.drop_duplicates('Keyword'), how='left', on="Keyword")
-            df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
-
-            df['Length'] = df['Keyword'].astype(str).map(len)
-            df = df.sort_values(by="Length", ascending=True)
-            df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
-            df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
-            df = df.drop('Length', axis=1)
-            df = df[['Cluster Name', 'Keyword']]
-            df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
-
-            uncluster_percent = (remaining / len(df)) * 100
-            clustered_percent = 100 - uncluster_percent
-            st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
-            st.write(f"Number of iterations: {iterations}")
-            st.write(f"Total unclustered keywords: {remaining}")
-            st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
-
-            if clustering_method != "Community Detection" and len(adjusted_embeddings) > 1:
-                cluster_coherences = calculate_cluster_coherence(adjusted_embeddings.cpu().numpy(), cluster_labels)
-                overall_coherence = np.mean(cluster_coherences)
-
-                st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
-                st.write("Cluster Coherences:")
-                cluster_names = df.groupby('Cluster Name')['Keyword'].first()
-                for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
-                    st.write(f"{cluster_name}: {coherence:.4f}")
-
-            result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
-            result_df.columns = ['Cluster', 'Keywords']
-            st.write(result_df)
-
-            embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
-
-            if embeddings.shape[1] > 3:
-                pca = PCA(n_components=3)
-                embeddings_3d = pca.fit_transform(embeddings)
-            elif embeddings.shape[1] < 3:
-                st.error("Error: Embeddings have fewer than 3 dimensions. Please choose a different model.")
-                st.stop()
+            if len(df_all) == 0:
+                st.error("No clusters were formed. Please check your data or adjust the clustering parameters.")
             else:
-                embeddings_3d = embeddings
+                df_new = pd.concat(df_all)
+                df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
 
-            embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
-            colors = ['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255)) for r, g, b in embeddings_normalized]
+                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
-            fig_3d = go.Figure(data=[go.Scatter3d(
-                x=embeddings_3d[:, 0],
-                y=embeddings_3d[:, 1],
-                z=embeddings_3d[:, 2],
-                mode='markers',
-                marker=dict(size=5, color=colors, opacity=0.8),
-                text=df['Keyword'],
-                hoverinfo='text'
-            )])
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df = df.drop('Length', axis=1)
 
-            fig_3d.update_layout(
-                width=1200,
-                height=675,
-                title='Keyword Embeddings in 3D Space',
-                scene=dict(xaxis_title='Dimension 1', yaxis_title='Dimension 2', zaxis_title='Dimension 3'),
-                margin=dict(l=0, r=0, b=0, t=40)
-            )
+                df = df[['Cluster Name', 'Keyword']]
 
-            st.plotly_chart(fig_3d, use_container_width=True)
-            with st.expander("ℹ️ About this visualization"):
-                st.write("The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts. This visualization works for multiple languages.")
-            
-            csv_data_clustered = result_df.to_csv(index=False)
-            st.download_button(
-                label="Download Clustered Keywords",
-                data=csv_data_clustered,
-                file_name="Clustered_Keywords.csv",
-                mime="text/csv"
-            )
+                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
-            if remaining > 0:
-                st.write("Unclustered Keywords:")
-                st.write(list(corpus_set))
+                uncluster_percent = (remaining / len(df)) * 100
+                clustered_percent = 100 - uncluster_percent
+                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
+                st.write(f"Number of iterations: {iterations}")
+                st.write(f"Total unclustered keywords: {remaining}")
+
+                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+
+                if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
+                    cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+                    overall_coherence = np.mean(cluster_coherences)
+
+                    st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                    st.write("Cluster Coherences:")
+                    cluster_names = df.groupby('Cluster Name')['Keyword'].first()
+                    for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
+                        st.write(f"{cluster_name}: {coherence:.4f}")
+
+                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+                result_df.columns = ['Cluster', 'Keywords']
+
+                st.write(result_df)
+
+                embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
+
+                if embeddings.shape[1] > 3:
+                    pca = PCA(n_components=3)
+                    embeddings_3d = pca.fit_transform(embeddings)
+                elif embeddings.shape[1] < 3:
+                    st.error("Error: Embeddings have fewer than 3 dimensions. Please choose a different model.")
+                    st.stop()
+                else:
+                    embeddings_3d = embeddings
+
+                embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
+
+                colors = ['rgb({},{},{})'.format(
+                    int(r*255), 
+                    int(g*255), 
+                    int(b*255)
+                ) for r, g, b in embeddings_normalized]
+
+                fig_3d = go.Figure(data=[go.Scatter3d(
+                    x=embeddings_3d[:, 0],
+                    y=embeddings_3d[:, 1],
+                    z=embeddings_3d[:, 2],
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color=colors,
+                        opacity=0.8
+                    ),
+                    text=df['Keyword'],
+                    hoverinfo='text'
+                )])
+
+                fig_3d.update_layout(
+                    width=1200,
+                    height=675,
+                    title='Keyword Embeddings in 3D Space',
+                    scene=dict(
+                        xaxis_title='Dimension 1',
+                        yaxis_title='Dimension 2',
+                        zaxis_title='Dimension 3'
+                    ),
+                    margin=dict(l=0, r=0, b=0, t=40)
+                )
+
+                st.plotly_chart(fig_3d, use_container_width=True)
+                with st.expander("ℹ️ About this visualization"):
+                    st.write("The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts. This visualization works for multiple languages.")
                 
-                unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
-                
-                csv_data_unclustered = unclustered_df.to_csv(index=False)
+                csv_data_clustered = result_df.to_csv(index=False)
                 st.download_button(
-                    label="Download Unclustered Keywords",
-                    data=csv_data_unclustered,
-                    file_name="Unclustered_Keywords.csv",
+                    label="Download Clustered Keywords",
+                    data=csv_data_clustered,
+                    file_name="Clustered_Keywords.csv",
                     mime="text/csv"
                 )
 
-            st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
+                if remaining > 0:
+                    st.write("Unclustered Keywords:")
+                    st.write(list(corpus_set))
+                    
+                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
+                    
+                    csv_data_unclustered = unclustered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Unclustered Keywords",
+                        data=csv_data_unclustered,
+                        file_name="Unclustered_Keywords.csv",
+                        mime="text/csv"
+                    )
+
+                st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
 
     except pd.errors.EmptyDataError:
         st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         st.error("Please check your data and try again.")
+
+except:
+    st.error("No data loaded.")
