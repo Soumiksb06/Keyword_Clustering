@@ -11,7 +11,6 @@ import torch
 from sklearn.decomposition import PCA
 from langdetect import detect_langs
 from iso639 import languages
-import re
 
 def generate_colors(num_colors):
     colors = []
@@ -52,54 +51,6 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
-def post_process_clusters(df, min_cluster_size):
-    def clean_and_split(keyword):
-        # Remove common prefixes and suffixes
-        keyword = re.sub(r'^(dr\.?|doctor)\s+', '', keyword, flags=re.IGNORECASE)
-        keyword = re.sub(r'\s+(fees|hospital|clinic)$', '', keyword, flags=re.IGNORECASE)
-        
-        parts = keyword.lower().split()
-        
-        # Consider up to three words for name
-        name_parts = parts[:min(3, len(parts))]
-        name = ' '.join(name_parts)
-        
-        # Everything else is considered location/additional info
-        location = ' '.join(parts[len(name_parts):])
-        
-        return name.strip(), location.strip()
-
-    def are_names_similar(name1, name2):
-        # Split names into parts
-        parts1 = set(name1.split())
-        parts2 = set(name2.split())
-        
-        # Check if they share at least two name part
-        return len(parts1.intersection(parts2)) > 1
-
-    new_clusters = []
-    for cluster_name, group in df.groupby('Cluster Name'):
-        name_location_pairs = group['Keyword'].apply(clean_and_split)
-        unique_names = set(pair[0] for pair in name_location_pairs)
-        
-        for name in unique_names:
-            similar_names = [n for n in unique_names if are_names_similar(name, n)]
-            for similar_name in similar_names:
-                mask = name_location_pairs.apply(lambda x: are_names_similar(x[0], similar_name))
-                sub_group = group.loc[mask]
-                if len(sub_group) >= min_cluster_size:
-                    new_cluster_name = f"{cluster_name} - {similar_name}"
-                    new_clusters.append(pd.DataFrame({
-                        'Cluster Name': new_cluster_name,
-                        'Keyword': sub_group['Keyword']
-                    }))
-                else:
-                    new_clusters.append(pd.DataFrame({
-                        'Cluster Name': cluster_name,
-                        'Keyword': sub_group['Keyword']
-                    }))
-    
-    return pd.concat(new_clusters).reset_index(drop=True)
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
@@ -111,14 +62,12 @@ clustering_method = st.sidebar.selectbox(
 )
 
 if clustering_method == "Community Detection":
-    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 99, 90) / 100
-    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
 elif clustering_method == "Agglomerative":
-    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
+    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
 elif clustering_method == "K-means":
-    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=15)
-    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=2)
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=5)
 
 transformer = st.selectbox(
     "Select Transformer Model",
@@ -255,9 +204,6 @@ if uploaded_file:
                 df = df.drop('Length', axis=1)
 
                 df = df[['Cluster Name', 'Keyword']]
-
-                # Apply post-processing to further split clusters
-                df = post_process_clusters(df, min_cluster_size)
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
 
