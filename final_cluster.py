@@ -9,6 +9,8 @@ import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import torch
 from sklearn.decomposition import PCA
+from langdetect import detect_langs
+from iso639 import languages
 
 def generate_colors(num_colors):
     colors = []
@@ -34,48 +36,56 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
             coherences.append(coherence)
     return coherences
 
+def detect_encoding(file):
+    raw_data = file.read()
+    file.seek(0)  # Reset file pointer
+    result = chardet.detect(raw_data)
+    return result['encoding']
+
+def detect_language(text):
+    try:
+        detected_langs = detect_langs(text)
+        main_language_code = detected_langs[0].lang
+        language_name = languages.get(part1=main_language_code).name
+        return language_name
+    except:
+        return 'Unknown Language'
+
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Community Detection", "Agglomerative", "K-means"]
+    ["Community Detection", "Agglomerative", "K-means"],
+    help="**Community Detection:** Finds natural groups in your data.\n\nWhen to use: If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
 )
 
 if clustering_method == "Community Detection":
-    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
 elif clustering_method == "Agglomerative":
-    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
+    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
 elif clustering_method == "K-means":
-    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=100, value=5)
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=50)
 
-transformer = st.selectbox("Select Transformer Model", ['all-MiniLM-L6-v2', 'all-mpnet-base-v2', 'paraphrase-mpnet-base-v2'])
+transformer = st.selectbox(
+    "Select Transformer Model",
+    ['distiluse-base-multilingual-cased-v2', 'paraphrase-multilingual-mpnet-base-v2', 'all-MiniLM-L6-v2'],
+    help="**distiluse-base-multilingual-cased-v2:** Supports 50+ languages, good for multilingual datasets.\n\n**paraphrase-multilingual-mpnet-base-v2:** Very accurate, supports 100+ languages.\n\n**all-MiniLM-L6-v2:** Fast, but primarily for English."
+)
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
 if uploaded_file:
     try:
-        raw_data = uploaded_file.getvalue()
-        detected = chardet.detect(raw_data)
-        encoding_type = detected['encoding'] if detected['confidence'] >= 0.8 else 'utf-8'
-        
-        try:
-            text_data = raw_data.decode(encoding_type)
-        except UnicodeDecodeError:
-            encoding_type = 'ISO-8859-1'
-            text_data = raw_data.decode(encoding_type)
-
-        firstline = text_data.splitlines()[0]
-        
+        encoding = detect_encoding(uploaded_file)
         if uploaded_file.name.endswith('.csv'):
-            delimiter_type = detect(firstline)
-            df = pd.read_csv(uploaded_file, encoding=encoding_type, delimiter=delimiter_type or ',')
+            df = pd.read_csv(uploaded_file, encoding=encoding)
         elif uploaded_file.name.endswith('.xlsx'):
             df = pd.read_excel(uploaded_file, engine='openpyxl')
 
         st.write("File loaded successfully!")
-        st.write(f"Detected encoding: '{encoding_type}'")
+        st.write(f"Detected encoding: '{encoding}'")
 
         df.rename(columns={"Search term": "Keyword", "keyword": "Keyword", "query": "Keyword", "Top queries": "Keyword", "queries": "Keyword", "Keywords": "Keyword", "keywords": "Keyword", "Search terms report": "Keyword"}, inplace=True)
 
@@ -90,7 +100,14 @@ if uploaded_file:
             df['Keyword'] = df['Keyword'].astype(str)
             
             st.write("Sample of the data (first 5 rows):")
-            st.write(df.head())
+            st.write(df['Keyword'].head())
+
+            sample_keywords = df['Keyword'].sample(min(100, len(df))).tolist()
+            detected_languages = [detect_language(keyword) for keyword in sample_keywords]
+            main_language = max(set(detected_languages), key=detected_languages.count)
+
+            st.write(f"Detected main language: {main_language}")
+            st.write("Other detected languages: " + ', '.join(set(detected_languages) - {main_language, 'unknown'}))
 
             model = SentenceTransformer(transformer)
             corpus_set = set(df['Keyword'])
@@ -130,10 +147,10 @@ if uploaded_file:
                         overall_coherence = np.mean(coherences)
                         st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
                         st.write("Cluster Coherences:")
-                        for i, coherence in enumerate(coherences):
-                            st.write(f"Cluster {i+1}: {coherence:.4f}")
-                    else:
-                        st.write("Coherence: Not applicable (insufficient data)")
+                        for cluster, coherence in zip(clusters, coherences):
+                            cluster_keywords = [corpus_sentences[i] for i in cluster]
+                            cluster_name = min(cluster_keywords, key=len)
+                            st.write(f"{cluster_name}: {coherence:.4f}")
                     
                 elif clustering_method == "Agglomerative":
                     max_clusters = len(corpus_sentences) // 4
@@ -179,6 +196,12 @@ if uploaded_file:
 
                 df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
 
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df = df.drop('Length', axis=1)
+
                 df = df[['Cluster Name', 'Keyword']]
 
                 df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
@@ -197,18 +220,17 @@ if uploaded_file:
 
                     st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
                     st.write("Cluster Coherences:")
-                    for i, coherence in enumerate(cluster_coherences):
-                        st.write(f"Cluster {i+1}: {coherence:.4f}")
+                    cluster_names = df.groupby('Cluster Name')['Keyword'].first()
+                    for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
+                        st.write(f"{cluster_name}: {coherence:.4f}")
 
                 result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
                 result_df.columns = ['Cluster', 'Keywords']
 
                 st.write(result_df)
 
-                # Generate embeddings for visualization
                 embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
 
-                # Reduce to 3D using PCA if necessary
                 if embeddings.shape[1] > 3:
                     pca = PCA(n_components=3)
                     embeddings_3d = pca.fit_transform(embeddings)
@@ -218,17 +240,14 @@ if uploaded_file:
                 else:
                     embeddings_3d = embeddings
 
-                # Normalize the embeddings to [0, 1] range for coloring
                 embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
 
-                # Create a color scale based on the normalized embeddings
                 colors = ['rgb({},{},{})'.format(
                     int(r*255), 
                     int(g*255), 
                     int(b*255)
                 ) for r, g, b in embeddings_normalized]
 
-                # Create the 3D scatter plot
                 fig_3d = go.Figure(data=[go.Scatter3d(
                     x=embeddings_3d[:, 0],
                     y=embeddings_3d[:, 1],
@@ -243,10 +262,9 @@ if uploaded_file:
                     hoverinfo='text'
                 )])
 
-                # Update layout for 3D scatter plot
                 fig_3d.update_layout(
-                    width=800,
-                    height=700,
+                    width=1200,
+                    height=675,
                     title='Keyword Embeddings in 3D Space',
                     scene=dict(
                         xaxis_title='Dimension 1',
@@ -256,9 +274,10 @@ if uploaded_file:
                     margin=dict(l=0, r=0, b=0, t=40)
                 )
 
-                # Display 3D scatter plot using Streamlit
                 st.plotly_chart(fig_3d, use_container_width=True)
-
+                with st.expander("ℹ️ About this visualization"):
+                    st.write("The position of each point in 3D space reflects the semantic similarity between keywords. Points that are closer together represent keywords with more similar meanings or contexts. This visualization works for multiple languages.")
+                
                 csv_data_clustered = result_df.to_csv(index=False)
                 st.download_button(
                     label="Download Clustered Keywords",
@@ -281,8 +300,11 @@ if uploaded_file:
                         mime="text/csv"
                     )
 
+                st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
+
     except pd.errors.EmptyDataError:
         st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         st.error("Please check your data and try again.")
+
