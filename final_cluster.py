@@ -125,29 +125,32 @@ if uploaded_file:
                 if len(corpus_sentences) == 0:
                     break
 
-                # Detect location-based keywords and separate them
-                location_keywords = [kw for kw in corpus_sentences if "location" in kw.lower()]
-                other_keywords = [kw for kw in corpus_sentences if kw not in location_keywords]
+                # Encode the keywords
+                embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
 
-                # Encode location-based keywords and others separately
-                location_embeddings = model.encode(location_keywords, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
-                other_embeddings = model.encode(other_keywords, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
+                # Adjust embeddings based on the presence of location indicators
+                location_keywords = ["city", "country", "location", "place", "region", "area"]  # Add more as needed
+                adjustment_factor = 1.5  # Adjust this factor as needed
+                adjusted_embeddings = []
+                for idx, keyword in enumerate(corpus_sentences):
+                    if any(loc_kw in keyword.lower() for loc_kw in location_keywords):
+                        adjusted_embedding = embeddings[idx] * adjustment_factor
+                    else:
+                        adjusted_embedding = embeddings[idx]
+                    adjusted_embeddings.append(adjusted_embedding)
+                adjusted_embeddings = torch.stack(adjusted_embeddings)
 
-                # Combine embeddings
-                corpus_embeddings = torch.cat((location_embeddings, other_embeddings), dim=0)
-                corpus_sentences = location_keywords + other_keywords
-                
-                if len(corpus_embeddings.shape) == 1:
-                    corpus_embeddings = corpus_embeddings.reshape(1, -1)
+                if len(adjusted_embeddings.shape) == 1:
+                    adjusted_embeddings = adjusted_embeddings.reshape(1, -1)
 
                 if clustering_method == "Community Detection":
-                    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                    clusters = util.community_detection(adjusted_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
                     cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
                     
                     coherences = []
                     for cluster in clusters:
                         if len(cluster) > 1:
-                            cluster_embeddings = corpus_embeddings[cluster]
+                            cluster_embeddings = adjusted_embeddings[cluster]
                             centroid = torch.mean(cluster_embeddings, dim=0)
                             distances = torch.norm(cluster_embeddings - centroid, dim=1)
                             coherence = 1 / (1 + torch.mean(distances).item())
@@ -166,7 +169,7 @@ if uploaded_file:
                     max_clusters = len(corpus_sentences) // 4
                     while True:
                         clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
-                        cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+                        cluster_labels = clustering_model.fit_predict(adjusted_embeddings.cpu().numpy())
                         n_clusters = len(np.unique(cluster_labels))
                         if n_clusters <= max_clusters:
                             break
@@ -175,7 +178,7 @@ if uploaded_file:
                     st.write(f"Number of clusters formed: {n_clusters}")
                 elif clustering_method == "K-means":
                     clustering_model = KMeans(n_clusters=n_clusters)
-                    cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+                    cluster_labels = clustering_model.fit_predict(adjusted_embeddings.cpu().numpy())
 
                 if clustering_method == "Community Detection":
                     new_clusters = []
@@ -232,8 +235,8 @@ if uploaded_file:
             st.write(f"Total unclustered keywords: {remaining}")
             st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
 
-            if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
-                cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+            if clustering_method != "Community Detection" and len(adjusted_embeddings) > 1:
+                cluster_coherences = calculate_cluster_coherence(adjusted_embeddings.cpu().numpy(), cluster_labels)
                 overall_coherence = np.mean(cluster_coherences)
 
                 st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
