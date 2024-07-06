@@ -317,6 +317,3 @@ if uploaded_file:
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         st.error("Please check your data and try again.")
-
-except:
-    st.error("No data loaded.")
