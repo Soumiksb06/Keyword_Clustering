@@ -62,12 +62,12 @@ clustering_method = st.sidebar.selectbox(
 )
 
 if clustering_method == "Community Detection":
-    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 80) / 100
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
 elif clustering_method == "Agglomerative":
-    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=2.5, step=0.1)
+    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
 elif clustering_method == "K-means":
-    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=5)
+    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=50)
 
 transformer = st.selectbox(
     "Select Transformer Model",
