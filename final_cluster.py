@@ -57,8 +57,23 @@ elif clustering_method == "K-means":
 
 transformer = st.selectbox(
     "Select Transformer Model",
-    ['all-MiniLM-L6-v2','distiluse-base-multilingual-cased-v2', 'paraphrase-multilingual-mpnet-base-v2'],
-    help="... (model descriptions) ..."
+    [
+        'all-mpnet-base-v2', 
+        'multi-qa-mpnet-base-cos-v1', 
+        'all-MiniLM-L12-v2'
+    ],
+    help="""
+    Select a Transformer model for semantic similarity:
+    
+    - "all-mpnet-base-v2": A large-scale multilingual model fine-tuned on various NLP tasks.
+      Suitable for general-purpose semantic clustering of keywords in multiple languages.
+    
+    - "multi-qa-mpnet-base-cos-v1": Optimized for Question Answering tasks using cosine similarity.
+      Use this model for applications where semantic relevance based on question answering is crucial.
+    
+    - "all-MiniLM-L12-v2": A lightweight version ideal for constrained environments or quick inference.
+      Suitable for smaller datasets or applications where speed and resource efficiency are priorities.
+    """
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
