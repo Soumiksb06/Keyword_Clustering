@@ -19,10 +19,8 @@ def generate_colors(num_colors):
     hue_values = np.linspace(0, 1, num_colors, endpoint=False)
     np.random.shuffle(hue_values)
     
-    for hue in hue_values:
-        lightness = (50 + np.random.rand() * 10) / 100.
-        saturation = (90 + np.random.rand() * 10) / 100.
-        rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+    for hue in hue_values, lightness, saturation in np.ndindex((50, 60), (90, 100)):
+        rgb = colorsys.hls_to_rgb(hue / 100, lightness / 100, saturation / 100)
         colors.append(tuple(int(x * 255) for x in rgb))
     return colors
 
@@ -59,45 +57,43 @@ def detect_language(text):
 
 def extract_location(text):
     specific_locations = ["delhi", "gurgaon", "pune"]
-    for location in specific_locations:
+    other_locations = ["chennai", "patna", "kannur", "kerala", "trivandrum",
+                       "bangalore", "india", "faridabad",
+                       "jaipur", "noida", "meerut", "greater noida", "jammu",
+                       "kolkata", "mumbai", "dwarka", "gurugram"]
+    for location in specific_locations + other_locations:
         if re.search(r'\b' + re.escape(location) + r'\b', text, re.IGNORECASE):
             return location
-
-    general_locations = ["chennai", "patna", "kannur", "kerala", "trivandrum",
-                         "bangalore", "india", "faridabad", "jaipur", "noida",
-                         "meerut", "greater noida", "jammu", "kolkata", "mumbai",
-                         "dwarka", "gurugram"]
-    for location in general_locations:
-        if re.search(r'\b' + re.escape(location) + r'\b', text, re.IGNORECASE):
-            return location
-
     return None
 
 
-def preprocess_keywords(df):
-    df['Location'] = df['Keyword'].apply(extract_location)
-    delhi_keywords = df[df['Location'] == 'delhi']
-    gurgaon_keywords = df[df['Location'] == 'gurgaon']
-    pune_keywords = df[df['Location'] == 'pune']
-    other_keywords = df[~df['Location'].isin(['delhi', 'gurgaon', 'pune'])]
-    return delhi_keywords, gurgaon_keywords, pune_keywords, other_keywords
+def cluster_keywords(keywords, method, model_name, additional_params):
+    model = SentenceTransformer(model_name)
+    embeddings = model.encode(keywords, convert_to_tensor=True)
 
+    if method == "Community Detection":
+        import networkx as nx
+        from community import community_louvain
 
-def cluster_keywords(keywords, model, clustering_method, n_clusters=None, distance_threshold=None, cluster_accuracy=None, min_cluster_size=None):
-    embeddings = model.encode(keywords['Keyword'].tolist(), convert_to_tensor=True)
-    
-    if clustering_method == "K-means":
-        clustering_model = KMeans(n_clusters=n_clusters)
-        cluster_labels = clustering_model.fit_predict(embeddings)
-    elif clustering_method == "Agglomerative":
-        clustering_model = AgglomerativeClustering(distance_threshold=distance_threshold, n_clusters=None)
-        cluster_labels = clustering_model.fit_predict(embeddings)
-    else:
-        # Implement Community Detection logic here if needed
-        pass
+        # Calculate cosine similarities and create a graph
+        cosine_scores = util.pytorch_cos_sim(embeddings, embeddings)
+        edges = [(i, j, float(cosine_scores[i][j])) for i in range(len(keywords)) for j in range(i + 1, len(keywords))]
+        G = nx.Graph()
+        G.add_weighted_edges_from(edges)
 
-    keywords['Cluster'] = cluster_labels
-    return keywords
+        # Apply community detection algorithm
+        partition = community_louvain.best_partition(G, resolution=additional_params['resolution'])
+        clusters = [partition[i] for i in range(len(keywords))]
+
+    elif method == "Agglomerative":
+        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=additional_params['distance_threshold'])
+        clusters = clustering_model.fit_predict(embeddings.cpu())
+
+    elif method == "K-means":
+        clustering_model = KMeans(n_clusters=additional_params['n_clusters'], random_state=0)
+        clusters = clustering_model.fit_predict(embeddings.cpu())
+
+    return clusters, embeddings
 
 
 st.title("Semantic Keyword Clustering Tool")
@@ -105,14 +101,20 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Agglomerative", "K-means"],
-    help="**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
+    ["Community Detection", "Agglomerative", "K-means"],
+    help="**Community Detection:** Finds natural groups in your data.\n\nWhen to use: If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
 )
 
-if clustering_method == "Agglomerative":
+if clustering_method == "Community Detection":
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+    additional_params = {'resolution': cluster_accuracy}
+elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
+    additional_params = {'distance_threshold': distance_threshold}
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=50)
+    additional_params = {'n_clusters': n_clusters}
 
 transformer = st.selectbox(
     "Select Transformer Model",
@@ -135,42 +137,63 @@ if uploaded_file:
 
         df.rename(columns={"Search term": "Keyword", "keyword": "Keyword", "query": "Keyword", "Top queries": "Keyword", "queries": "Keyword"}, inplace=True)
 
-        delhi_keywords, gurgaon_keywords, pune_keywords, other_keywords = preprocess_keywords(df)
+        keywords = df['Keyword'].tolist()
 
-        model = SentenceTransformer(transformer)
+        # Process specific locations (Delhi, Gurgaon, Pune) separately
+        specific_keywords = [kw for kw in keywords if extract_location(kw) in ["delhi", "gurgaon", "pune"]]
+        other_keywords = [kw for kw in keywords if extract_location(kw) not in ["delhi", "gurgaon", "pune"]]
 
-        if not delhi_keywords.empty:
-            delhi_keywords = cluster_keywords(delhi_keywords, model, clustering_method, n_clusters, distance_threshold)
-        if not gurgaon_keywords.empty:
-            gurgaon_keywords = cluster_keywords(gurgaon_keywords, model, clustering_method, n_clusters, distance_threshold)
-        if not pune_keywords.empty:
-            pune_keywords = cluster_keywords(pune_keywords, model, clustering_method, n_clusters, distance_threshold)
-        if not other_keywords.empty:
-            other_keywords = cluster_keywords(other_keywords, model, clustering_method, n_clusters, distance_threshold)
+        # Cluster specific location keywords
+        if specific_keywords:
+            specific_clusters, specific_embeddings = cluster_keywords(specific_keywords, clustering_method, transformer, additional_params)
 
-        clustered_df = pd.concat([delhi_keywords, gurgaon_keywords, pune_keywords, other_keywords])
-        st.write(clustered_df)
+        # Cluster other keywords
+        if other_keywords:
+            other_clusters, other_embeddings = cluster_keywords(other_keywords, clustering_method, transformer, additional_params)
 
-        # Visualize clusters
+        # Combine results
+        combined_keywords = specific_keywords + other_keywords
+        combined_clusters = np.concatenate((specific_clusters, other_clusters))
+
+        # Calculate cluster coherence
+        combined_embeddings = torch.cat((specific_embeddings, other_embeddings), dim=0)
+        coherences = calculate_cluster_coherence(combined_embeddings, combined_clusters)
+
+        st.write(f"Number of clusters: {len(set(combined_clusters))}")
+        st.write(f"Average cluster coherence: {np.mean(coherences):.4f}")
+
+        # Create a dataframe with the results
+        result_df = pd.DataFrame({'Keyword': combined_keywords, 'Cluster': combined_clusters})
+
+        # Visualize the clusters
         pca = PCA(n_components=2)
-        embeddings_2d = pca.fit_transform(model.encode(clustered_df['Keyword'].tolist(), convert_to_tensor=True))
-        
+        reduced_embeddings = pca.fit_transform(combined_embeddings.cpu().numpy())
+        result_df['x'] = reduced_embeddings[:, 0]
+        result_df['y'] = reduced_embeddings[:, 1]
+
         fig = go.Figure()
+        colors = generate_colors(len(set(combined_clusters)))
+        for cluster_id in set(combined_clusters):
+            cluster_data = result_df[result_df['Cluster'] == cluster_id]
+            fig.add_trace(go.Scatter(
+                x=cluster_data['x'],
+                y=cluster_data['y'],
+                mode='markers',
+                marker=dict(color='rgba' + str(colors[cluster_id]), size=10, line=dict(width=2, color='DarkSlateGrey')),
+                text=cluster_data['Keyword'],
+                name=f'Cluster {cluster_id}'
+            ))
 
-        unique_labels = clustered_df['Cluster'].unique()
-        colors = generate_colors(len(unique_labels))
-
-        for label, color in zip(unique_labels, colors):
-            cluster_points = embeddings_2d[clustered_df['Cluster'] == label]
-            fig.add_trace(go.Scatter(x=cluster_points[:, 0], y=cluster_points[:, 1],
-                                     mode='markers', marker=dict(color='rgba' + str(color + (0.8,)), size=8),
-                                     name=f'Cluster {label}'))
-
-        fig.update_layout(title="Keyword Clusters",
-                          xaxis_title="PCA Component 1",
-                          yaxis_title="PCA Component 2",
-                          showlegend=True)
+        fig.update_layout(title='Keyword Clusters', xaxis_title='PCA Component 1', yaxis_title='PCA Component 2')
         st.plotly_chart(fig)
 
+        # Option to download the clustered keywords
+        st.download_button(
+            label="Download Clustered Keywords",
+            data=result_df.to_csv(index=False),
+            file_name='clustered_keywords.csv',
+            mime='text/csv'
+        )
+
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"Error: {e}")
