@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 import chardet
-from detect_delimiter import detect
 import numpy as np
 import plotly.graph_objects as go
 import colorsys
@@ -19,7 +18,7 @@ def generate_colors(num_colors):
     hue_values = np.linspace(0, 1, num_colors, endpoint=False)
     np.random.shuffle(hue_values)
     
-    for hue in hue_values, lightness, saturation in np.ndindex((50, 60), (90, 100)):
+    for hue, lightness, saturation in np.ndindex((50, 60), (90, 100)):
         rgb = colorsys.hls_to_rgb(hue / 100, lightness / 100, saturation / 100)
         colors.append(tuple(int(x * 255) for x in rgb))
     return colors
@@ -135,9 +134,9 @@ if uploaded_file:
         st.write("File loaded successfully!")
         st.write(f"Detected encoding: '{encoding}'")
 
-        df.rename(columns={"Search term": "Keyword", "keyword": "Keyword", "query": "Keyword", "Top queries": "Keyword", "queries": "Keyword"}, inplace=True)
-
-        keywords = df['Keyword'].tolist()
+        # Extracting keywords from the CSV/XLSX file
+        keywords_column = st.selectbox("Select column with Keywords", df.columns)
+        keywords = df[keywords_column].tolist()
 
         # Process specific locations (Delhi, Gurgaon, Pune) separately
         specific_keywords = [kw for kw in keywords if extract_location(kw) in ["delhi", "gurgaon", "pune"]]
