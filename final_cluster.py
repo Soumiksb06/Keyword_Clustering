@@ -43,9 +43,22 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Community Detection", "Agglomerative", "K-means"],
-    help="... (option descriptions) ..."
+    [
+        "Community Detection", 
+        "Agglomerative", 
+        "K-means"
+    ],
+    help="""
+    Select a clustering method:
+    
+    - "Community Detection": Finds densely connected clusters in complex networks of keywords. \n\nUseful when your data represents interconnected communities or groups.
+    
+    - "Agglomerative": Hierarchically merges clusters based on proximity, forming a tree-like structure. \n\nSuitable when the number of clusters isn't known beforehand or for hierarchical clustering.
+    
+    - "K-means": Divides data into k clusters based on similarity, aiming to minimize variance within clusters. \n\nIdeal when the number of clusters is known or can be estimated, and for datasets with clear separations between clusters.
+    """
 )
+
 
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
