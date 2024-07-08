@@ -53,16 +53,34 @@ def detect_language(text):
         return 'Unknown Language'
 
 def extract_location(keyword):
-    location_patterns = [
-        r"\b(chennai|bangalore|pune|delhi|faridabad|gurgaon|jaipur|noida)\b",
-        r"\b(mumbai|dwarka|gurugram|kolkata)\b",
-        r"\b(india|kannur|trivandrum|meerut|greater noida|jammu|chandigarh|kerala|gynae|gyno)\b"
-    ]
-    for pattern in location_patterns:
-        match = re.search(pattern, keyword, re.IGNORECASE)
-        if match:
-            return match.group(0).capitalize()
+    location_mapping = {
+        "chennai": ["chennai"],
+        "bangalore": ["bangalore", "bengaluru"],
+        "pune": ["pune"],
+        "delhi": ["delhi"],
+        "faridabad": ["faridabad"],
+        "gurgaon": ["gurgaon", "gurugram"],
+        "jaipur": ["jaipur"],
+        "noida": ["noida"],
+        "mumbai": ["mumbai"],
+        "dwarka": ["dwarka"],
+        "kolkata": ["kolkata"],
+        "india": ["india"],
+        "kannur": ["kannur"],
+        "trivandrum": ["trivandrum"],
+        "meerut": ["meerut"],
+        "greater noida": ["greater noida"],
+        "jammu": ["jammu"],
+        "chandigarh": ["chandigarh"],
+        "kerala": ["kerala"],
+    }
+    
+    for standard_location, variations in location_mapping.items():
+        for variation in variations:
+            if re.search(rf"\b{re.escape(variation)}\b", keyword, re.IGNORECASE):
+                return standard_location.capitalize()
     return None
+
 
 
 st.title("Semantic Keyword Clustering Tool")
