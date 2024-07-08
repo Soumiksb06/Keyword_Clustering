@@ -1,11 +1,15 @@
 import streamlit as st
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
-import numpy as np
-from sklearn.cluster import AgglomerativeClustering, KMeans
 import chardet
-import re
-from collections import defaultdict
+from detect_delimiter import detect
+import numpy as np
+import colorsys
+from sklearn.cluster import AgglomerativeClustering, KMeans
+import torch
+from sklearn.decomposition import PCA
+from langdetect import detect_langs
+from iso639 import languages
 
 def calculate_cluster_coherence(embeddings, cluster_labels):
     unique_labels = np.unique(cluster_labels)
