@@ -7,9 +7,10 @@ import numpy as np
 import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import torch
-from sklearn.decomposition import PCA
 from langdetect import detect_langs
 from iso639 import languages
+import re
+from collections import defaultdict
 
 def calculate_cluster_coherence(embeddings, cluster_labels):
     unique_labels = np.unique(cluster_labels)
