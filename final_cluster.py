@@ -4,6 +4,8 @@ from sentence_transformers import SentenceTransformer, util
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import chardet
+import re
+from collections import defaultdict
 
 def calculate_cluster_coherence(embeddings, cluster_labels):
     unique_labels = np.unique(cluster_labels)
@@ -24,14 +26,15 @@ def preprocess_names(names):
         processed_names.append(name)
     return processed_names
 
-def custom_clustering_rules(names, clusters, exclusion_pairs):
-    for pair in exclusion_pairs:
-        for cluster in clusters:
-            if pair[0] in cluster and pair[1] in cluster:
-                clusters.remove(cluster)
-                clusters.append([name for name in cluster if name != pair[1]])
-                clusters.append([pair[1]])
-    return clusters
+def extract_significant_parts(names):
+    significant_parts = []
+    for name in names:
+        parts = name.split()
+        if len(parts) > 1:
+            significant_parts.append(parts[-1])
+        else:
+            significant_parts.append(parts[0])
+    return significant_parts
 
 def detect_encoding(file):
     raw_data = file.read()
@@ -39,15 +42,31 @@ def detect_encoding(file):
     result = chardet.detect(raw_data)
     return result['encoding']
 
+def apply_custom_clustering_rules(df, clusters):
+    name_to_cluster = defaultdict(list)
+    for name, cluster in zip(df['Keyword'], df['Cluster Name']):
+        significant_part = re.sub(r'dr |gynaecologist', '', name, flags=re.IGNORECASE).split()[-1].lower()
+        name_to_cluster[significant_part].append(cluster)
+    
+    for significant_part, cluster_list in name_to_cluster.items():
+        if len(cluster_list) > 1:
+            for cluster in cluster_list:
+                if len(df[df['Cluster Name'] == cluster]) > 1:
+                    df.loc[df['Keyword'].str.lower().str.contains(significant_part, na=False), 'Cluster Name'] = f"Separate Cluster: {significant_part}"
+    return df
+
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Agglomerative", "K-means"]
+    ["Community Detection", "Agglomerative", "K-means"]
 )
 
-if clustering_method == "Agglomerative":
+if clustering_method == "Community Detection":
+    cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
+    min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=50)
@@ -58,16 +77,6 @@ transformer = st.selectbox(
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
-
-exclusion_pairs = st.text_area("Enter exclusion pairs (one pair per line, names separated by a comma):")
-
-exclusion_list = []
-if exclusion_pairs:
-    exclusion_lines = exclusion_pairs.split('\n')
-    for line in exclusion_lines:
-        if ',' in line:
-            pair = tuple(map(str.strip, line.split(',')))
-            exclusion_list.append(pair)
 
 if uploaded_file:
     try:
@@ -116,7 +125,29 @@ if uploaded_file:
                 if len(corpus_embeddings.shape) == 1:
                     corpus_embeddings = corpus_embeddings.reshape(1, -1)
                 
-                if clustering_method == "Agglomerative":
+                if clustering_method == "Community Detection":
+                    clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                    cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
+                    
+                    coherences = []
+                    for cluster in clusters:
+                        if len(cluster) > 1:
+                            cluster_embeddings = corpus_embeddings[cluster]
+                            centroid = torch.mean(cluster_embeddings, dim=0)
+                            distances = torch.norm(cluster_embeddings - centroid, dim=1)
+                            coherence = 1 / (1 + torch.mean(distances).item())
+                            coherences.append(coherence)
+                    
+                    if coherences:
+                        overall_coherence = np.mean(coherences)
+                        st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                        st.write("Cluster Coherences:")
+                        for cluster, coherence in zip(clusters, coherences):
+                            cluster_keywords = [corpus_sentences[i] for i in cluster]
+                            cluster_name = min(cluster_keywords, key=len)
+                            st.write(f"{cluster_name}: {coherence:.4f}")
+                    
+                elif clustering_method == "Agglomerative":
                     max_clusters = len(corpus_sentences) // 4
                     while True:
                         clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
@@ -131,9 +162,15 @@ if uploaded_file:
                     clustering_model = KMeans(n_clusters=n_clusters)
                     cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
-                for sentence_id, cluster_id in enumerate(cluster_labels):
-                    corpus_sentences_list.append(corpus_sentences[sentence_id])
-                    cluster_name_list.append(f"Cluster {cluster_id + 1}")
+                if clustering_method == "Community Detection":
+                    for keyword, cluster in enumerate(clusters):
+                        for sentence_id in cluster:
+                            corpus_sentences_list.append(corpus_sentences[sentence_id])
+                            cluster_name_list.append(f"Cluster {keyword + 1}, #{len(cluster)} Elements")
+                else:
+                    for sentence_id, cluster_id in enumerate(cluster_labels):
+                        corpus_sentences_list.append(corpus_sentences[sentence_id])
+                        cluster_name_list.append(f"Cluster {cluster_id + 1}")
 
                 df_new = pd.DataFrame({'Cluster Name': cluster_name_list, 'Keyword': corpus_sentences_list})
 
@@ -172,7 +209,7 @@ if uploaded_file:
 
                 st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
 
-                if len(corpus_embeddings) > 1:
+                if clustering_method != "Community Detection" and len(corpus_embeddings) > 1:
                     cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
                     overall_coherence = np.mean(cluster_coherences)
 
@@ -182,16 +219,11 @@ if uploaded_file:
                     for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
                         st.write(f"{cluster_name}: {coherence:.4f}")
 
-                # Applying custom clustering rules
-                clusters = [[] for _ in range(len(np.unique(cluster_labels)))]
-                for name, label in zip(df['Keyword'], df['Cluster Name']):
-                    cluster_id = int(label.split(' ')[1]) - 1
-                    clusters[cluster_id].append(name)
-                
-                clusters = custom_clustering_rules(processed_keywords, clusters, exclusion_list)
+                df = apply_custom_clustering_rules(df, clusters)
 
-                result_df = pd.DataFrame([{'Cluster': f'Cluster {i+1}', 'Keywords': ', '.join(cluster)} for i, cluster in enumerate(clusters)])
-                
+                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+                result_df.columns = ['Cluster', 'Keywords']
+
                 st.write(result_df)
 
                 csv_data_clustered = result_df.to_csv(index=False)
@@ -215,5 +247,11 @@ if uploaded_file:
                         file_name="Unclustered_Keywords.csv",
                         mime="text/csv"
                     )
+
+                st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
+
+    except pd.errors.EmptyDataError:
+        st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
-        st.error(f"Error loading the file: {e}")
+        st.error(f"An unexpected error occurred: {e}")
+        st.error("Please check your data and try again.")
