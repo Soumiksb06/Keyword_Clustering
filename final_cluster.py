@@ -65,7 +65,19 @@ st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Community Detection", "Agglomerative", "K-means"]
+    ["Community Detection", "Agglomerative", "K-means"],
+    help="""
+    Select a clustering method:
+
+    - "Community Detection": Finds densely connected clusters in complex networks of keywords.
+        - Useful when your data represents interconnected communities or groups.
+    
+    - "Agglomerative": Hierarchically merges clusters based on proximity, forming a tree-like structure. 
+        - Suitable when the number of clusters isn't known beforehand or for hierarchical clustering.
+    
+    - "K-means": Divides data into k clusters based on similarity, aiming to minimize variance within clusters. 
+        - Ideal when the number of clusters is known or can be estimated, and for datasets with clear separations between clusters.
+    """
 )
 
 if clustering_method == "Community Detection":
@@ -78,7 +90,19 @@ elif clustering_method == "K-means":
 
 transformer = st.selectbox(
     "Select Transformer Model",
-    ['all-mpnet-base-v2', 'multi-qa-mpnet-base-cos-v1', 'all-MiniLM-L12-v2']
+    ['all-mpnet-base-v2', 'multi-qa-mpnet-base-cos-v1', 'all-MiniLM-L12-v2'],
+    help="""
+    Select a Transformer model for semantic similarity:
+
+    - "all-mpnet-base-v2": A large-scale multilingual model fine-tuned on various NLP tasks.
+      Suitable for general-purpose semantic clustering of keywords in multiple languages.
+    
+    - "multi-qa-mpnet-base-cos-v1": Optimized for Question Answering tasks using cosine similarity.
+      Use this model for applications where semantic relevance based on question answering is crucial.
+    
+    - "all-MiniLM-L12-v2": A lightweight version ideal for constrained environments or quick inference.
+      Suitable for smaller datasets or applications where speed and resource efficiency are priorities.
+    """
 )
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
