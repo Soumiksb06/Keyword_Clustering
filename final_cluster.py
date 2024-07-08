@@ -57,7 +57,7 @@ elif clustering_method == "K-means":
 
 transformer = st.selectbox(
     "Select Transformer Model",
-    ['distiluse-base-multilingual-cased-v2', 'paraphrase-multilingual-mpnet-base-v2', 'all-MiniLM-L6-v2'],
+    ['all-MiniLM-L6-v2','distiluse-base-multilingual-cased-v2', 'paraphrase-multilingual-mpnet-base-v2'],
     help="... (model descriptions) ..."
 )
 
