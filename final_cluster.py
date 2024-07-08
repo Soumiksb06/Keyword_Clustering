@@ -1,125 +1,118 @@
 import streamlit as st
 import pandas as pd
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, util
+import chardet
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering, KMeans
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
-import time
-from langdetect import detect_langs
-from iso639 import languages
+import torch
 
-def detect_language(text):
-    try:
-        detected_langs = detect_langs(text)
-        main_language_code = detected_langs[0].lang
-        language_name = languages.get(part1=main_language_code).name
-        return language_name
-    except:
-        return 'Unknown Language'
+def detect_encoding(file):
+    raw_data = file.read()
+    file.seek(0)  # Reset file pointer
+    result = chardet.detect(raw_data)
+    return result['encoding']
 
-def geocode_keyword(geolocator, keyword):
-    try:
-        location = geolocator.geocode(keyword)
-        if location:
-            return location.latitude, location.longitude
-        else:
-            return None, None
-    except (GeocoderTimedOut, GeocoderUnavailable):
-        time.sleep(1)
-        return geocode_keyword(geolocator, keyword)
+def calculate_cluster_coherence(embeddings, cluster_labels):
+    unique_labels = np.unique(cluster_labels)
+    coherences = []
+    for label in unique_labels:
+        cluster_embeddings = embeddings[cluster_labels == label]
+        if len(cluster_embeddings) > 1:
+            centroid = np.mean(cluster_embeddings, axis=0)
+            distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
+            coherence = 1 / (1 + np.mean(distances))
+            coherences.append(coherence)
+    return coherences
 
-st.title("Geographical-Aware Keyword Clustering Tool")
+st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
-clustering_method = st.selectbox(
+clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
-    ["Agglomerative", "K-means"]
+    ["Community Detection", "Agglomerative", "K-means"],
+    help="**Community Detection:** Finds natural groups in your data.\n\nWhen to use: If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
 )
 
-if clustering_method == "Agglomerative":
-    distance_threshold = st.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
-else:
-    n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=1000, value=50)
+if clustering_method == "Community Detection":
+    cluster_accuracy = st.sidebar.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
+    min_cluster_size = st.sidebar.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
+elif clustering_method == "Agglomerative":
+    distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
+elif clustering_method == "K-means":
+    n_clusters = st.sidebar.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=50)
 
-transformer_model = 'distiluse-base-multilingual-cased-v2'
+transformer = st.selectbox(
+    "Select Transformer Model",
+    ['distiluse-base-multilingual-cased-v2', 'paraphrase-multilingual-mpnet-base-v2', 'all-MiniLM-L6-v2'],
+    help="**distiluse-base-multilingual-cased-v2:** Supports 50+ languages, good for multilingual datasets.\n\n**paraphrase-multilingual-mpnet-base-v2:** Very accurate, supports 100+ languages.\n\n**all-MiniLM-L6-v2:** Fast, but primarily for English."
+)
 
 uploaded_file = st.file_uploader("Upload Keyword CSV or XLSX", type=["csv", "xlsx"])
 
 if uploaded_file:
     try:
+        encoding = detect_encoding(uploaded_file)
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+            df = pd.read_csv(uploaded_file, encoding=encoding)
         elif uploaded_file.name.endswith('.xlsx'):
             df = pd.read_excel(uploaded_file, engine='openpyxl')
 
         st.write("File loaded successfully!")
+        st.write(f"Detected encoding: '{encoding}'")
 
-        # Add dropdown to select keyword column
+        # Allow user to select the keyword column
         keyword_column = st.selectbox("Select the column containing keywords", df.columns)
 
-        if keyword_column not in df.columns:
-            st.error(f"Error! The selected column '{keyword_column}' is not in the dataframe!")
-        else:
-            df['Keyword'] = df[keyword_column].astype(str)
-            
+        if keyword_column:
             st.write(f"Total rows: {len(df)}")
-            st.write(f"Number of unique keywords: {df['Keyword'].nunique()}")
+            st.write(f"Number of unique keywords: {df[keyword_column].nunique()}")
+            
+            df[keyword_column] = df[keyword_column].astype(str)
             
             st.write("Sample of the data (first 5 rows):")
-            st.write(df['Keyword'].head())
+            st.write(df[keyword_column].head())
 
-            sample_keywords = df['Keyword'].sample(min(100, len(df))).tolist()
-            detected_languages = [detect_language(keyword) for keyword in sample_keywords]
-            main_language = max(set(detected_languages), key=detected_languages.count)
+            model = SentenceTransformer(transformer)
+            corpus_sentences = df[keyword_column].tolist()
+            corpus_embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
 
-            st.write(f"Detected main language: {main_language}")
-            st.write("Other detected languages: " + ', '.join(set(detected_languages) - {main_language, 'Unknown Language'}))
-
-            with st.spinner("Geocoding keywords..."):
-                geolocator = Nominatim(user_agent="keyword_clustering_app")
-                df['Latitude'], df['Longitude'] = zip(*df['Keyword'].apply(lambda x: geocode_keyword(geolocator, x)))
-
-            model = SentenceTransformer(transformer_model)
-            
-            with st.spinner("Encoding keywords..."):
-                embeddings = model.encode(df['Keyword'].tolist(), show_progress_bar=False)
-
-            geo_data = df[['Latitude', 'Longitude']].values
-            geo_data = np.nan_to_num(geo_data)  # Replace NaN with 0
-            geo_weight = 0.5  # Adjust this weight to control the influence of geographical data
-            combined_data = np.hstack([embeddings, geo_weight * geo_data])
-
-            with st.spinner("Clustering keywords..."):
-                if clustering_method == "Agglomerative":
-                    clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
-                else:
-                    clustering_model = KMeans(n_clusters=n_clusters)
-                
-                cluster_labels = clustering_model.fit_predict(combined_data)
+            if clustering_method == "Community Detection":
+                clusters = util.community_detection(corpus_embeddings, min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
+            elif clustering_method == "Agglomerative":
+                clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
+                cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+            elif clustering_method == "K-means":
+                clustering_model = KMeans(n_clusters=n_clusters)
+                cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
 
             df['Cluster'] = cluster_labels
+            df['Cluster'] = df['Cluster'].apply(lambda x: f"Cluster {x + 1}")
 
-            st.write(f"Number of clusters: {len(df['Cluster'].unique())}")
+            result_df = df.groupby('Cluster')[keyword_column].apply(', '.join).reset_index()
+            result_df.columns = ['Cluster', 'Keywords']
 
-            result_df = df.groupby('Cluster')['Keyword'].apply(list).reset_index()
-            result_df['Cluster_Size'] = result_df['Keyword'].apply(len)
-            result_df = result_df.sort_values('Cluster_Size', ascending=False)
+            st.write(result_df)
 
-            st.write("Cluster Summary:")
-            for _, row in result_df.iterrows():
-                st.write(f"Cluster {row['Cluster']} (Size: {row['Cluster_Size']}):")
-                st.write(", ".join(row['Keyword'][:10]) + ("..." if len(row['Keyword']) > 10 else ""))
-                st.write("---")
+            if clustering_method != "Community Detection":
+                cluster_coherences = calculate_cluster_coherence(corpus_embeddings.cpu().numpy(), cluster_labels)
+                overall_coherence = np.mean(cluster_coherences)
 
-            csv_data = df.to_csv(index=False)
+                st.write(f"Overall Clustering Coherence: {overall_coherence:.4f}")
+                st.write("Cluster Coherences:")
+                for cluster_id, coherence in enumerate(cluster_coherences):
+                    st.write(f"Cluster {cluster_id + 1}: {coherence:.4f}")
+
+            csv_data_clustered = result_df.to_csv(index=False)
             st.download_button(
                 label="Download Clustered Keywords",
-                data=csv_data,
+                data=csv_data_clustered,
                 file_name="Clustered_Keywords.csv",
                 mime="text/csv"
             )
 
+    except pd.errors.EmptyDataError:
+        st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         st.error("Please check your data and try again.")
