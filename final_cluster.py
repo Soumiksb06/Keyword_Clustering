@@ -54,12 +54,16 @@ def detect_language(text):
 
 def extract_location(keyword):
     location_patterns = [
-        r"\bchennai\b", r"\bpune\b", r"\bpatna\b", r"\bkannur\b", r"\bkerala\b", r"\btrivandrum\b"
+        r"\b(chennai|bangalore|pune|delhi|faridabad|gurgaon|jaipur|noida)\b",
+        r"\b(mumbai|dwarka|gurugram|kolkata)\b",
+        r"\b(india|kannur|trivandrum|meerut|greater noida|jammu|chandigarh|kerala|gynae|gyno)\b"
     ]
     for pattern in location_patterns:
-        if re.search(pattern, keyword, re.IGNORECASE):
-            return re.search(pattern, keyword, re.IGNORECASE).group(0).capitalize()
+        match = re.search(pattern, keyword, re.IGNORECASE)
+        if match:
+            return match.group(0).capitalize()
     return None
+
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
