@@ -51,11 +51,14 @@ clustering_method = st.sidebar.selectbox(
     help="""
     Select a clustering method:
     
-    - "Community Detection": Finds densely connected clusters in complex networks of keywords. \n\nUseful when your data represents interconnected communities or groups.
+    - "Community Detection": Finds densely connected clusters in complex networks of keywords.
+        - - Useful when your data represents interconnected communities or groups.
     
-    - "Agglomerative": Hierarchically merges clusters based on proximity, forming a tree-like structure. \n\nSuitable when the number of clusters isn't known beforehand or for hierarchical clustering.
+    - "Agglomerative": Hierarchically merges clusters based on proximity, forming a tree-like structure. 
+        - - Suitable when the number of clusters isn't known beforehand or for hierarchical clustering.
     
-    - "K-means": Divides data into k clusters based on similarity, aiming to minimize variance within clusters. \n\nIdeal when the number of clusters is known or can be estimated, and for datasets with clear separations between clusters.
+    - "K-means": Divides data into k clusters based on similarity, aiming to minimize variance within clusters. 
+        - - Ideal when the number of clusters is known or can be estimated, and for datasets with clear separations between clusters.
     """
 )
 
