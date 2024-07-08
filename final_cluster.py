@@ -2,15 +2,26 @@ import streamlit as st
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 import chardet
+from detect_delimiter import detect
 import numpy as np
+import colorsys
 from sklearn.cluster import AgglomerativeClustering, KMeans
 import torch
+from sklearn.decomposition import PCA
+from langdetect import detect_langs
+from iso639 import languages
 
-def detect_encoding(file):
-    raw_data = file.read()
-    file.seek(0)  # Reset file pointer
-    result = chardet.detect(raw_data)
-    return result['encoding']
+def generate_colors(num_colors):
+    colors = []
+    hue_values = np.linspace(0, 1, num_colors, endpoint=False)
+    np.random.shuffle(hue_values)
+    
+    for hue in hue_values:
+        lightness = (50 + np.random.rand() * 10) / 100.
+        saturation = (90 + np.random.rand() * 10) / 100.
+        rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+        colors.append(tuple(int(x * 255) for x in rgb))
+    return colors
 
 def calculate_cluster_coherence(embeddings, cluster_labels):
     unique_labels = np.unique(cluster_labels)
@@ -23,6 +34,21 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
             coherence = 1 / (1 + np.mean(distances))
             coherences.append(coherence)
     return coherences
+
+def detect_encoding(file):
+    raw_data = file.read()
+    file.seek(0)  # Reset file pointer
+    result = chardet.detect(raw_data)
+    return result['encoding']
+
+def detect_language(text):
+    try:
+        detected_langs = detect_langs(text)
+        main_language_code = detected_langs[0].lang
+        language_name = languages.get(part1=main_language_code).name
+        return language_name
+    except:
+        return 'Unknown Language'
 
 st.title("Semantic Keyword Clustering Tool")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
@@ -72,6 +98,17 @@ if uploaded_file:
             st.write("Sample of the data (first 5 rows):")
             st.write(df[keyword_column].head())
 
+            # Remove any rows with empty keywords
+            df = df[df[keyword_column].notna() & (df[keyword_column] != "")]
+            st.write(f"Rows after removing empty keywords: {len(df)}")
+
+            sample_keywords = df[keyword_column].sample(min(100, len(df))).tolist()
+            detected_languages = [detect_language(keyword) for keyword in sample_keywords]
+            main_language = max(set(detected_languages), key=detected_languages.count)
+
+            st.write(f"Detected main language: {main_language}")
+            st.write("Other detected languages: " + ', '.join(set(detected_languages) - {main_language, 'Unknown Language'}))
+
             model = SentenceTransformer(transformer)
             corpus_sentences = df[keyword_column].tolist()
             corpus_embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
@@ -83,14 +120,23 @@ if uploaded_file:
                 clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
                 cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
             elif clustering_method == "K-means":
-                clustering_model = KMeans(n_clusters=n_clusters)
+                clustering_model = KMeans(n_clusters=min(n_clusters, len(corpus_sentences)))
                 cluster_labels = clustering_model.fit_predict(corpus_embeddings.cpu().numpy())
+
+            if len(cluster_labels) != len(df):
+                st.error(f"Mismatch between number of cluster labels ({len(cluster_labels)}) and number of rows ({len(df)})")
+                st.error("This may be due to duplicate keywords or preprocessing issues.")
+                st.stop()
 
             df['Cluster'] = cluster_labels
             df['Cluster'] = df['Cluster'].apply(lambda x: f"Cluster {x + 1}")
 
             result_df = df.groupby('Cluster')[keyword_column].apply(', '.join).reset_index()
             result_df.columns = ['Cluster', 'Keywords']
+
+            # Sort clusters by size
+            result_df['Cluster_Size'] = result_df['Keywords'].apply(lambda x: len(x.split(', ')))
+            result_df = result_df.sort_values('Cluster_Size', ascending=False).drop('Cluster_Size', axis=1)
 
             st.write(result_df)
 
@@ -111,8 +157,25 @@ if uploaded_file:
                 mime="text/csv"
             )
 
+            # Dimensionality reduction for visualization
+            pca = PCA(n_components=3)
+            embeddings_3d = pca.fit_transform(corpus_embeddings.cpu().numpy())
+
+            embeddings_normalized = (embeddings_3d - embeddings_3d.min(axis=0)) / (embeddings_3d.max(axis=0) - embeddings_3d.min(axis=0))
+
+            colors = ['rgb({},{},{})'.format(
+                int(r*255), 
+                int(g*255), 
+                int(b*255)
+            ) for r, g, b in embeddings_normalized]
+
+            # We're removing the 3D plot as per your request
+
     except pd.errors.EmptyDataError:
         st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
+        st.error(f"An unexpected error occurred: {str(e)}")
         st.error("Please check your data and try again.")
+        st.exception(e)  # This will print the full traceback
+
+st.write("Note: This tool supports clustering of keywords in multiple languages. The effectiveness may vary depending on the selected model and the languages present in your data.")
