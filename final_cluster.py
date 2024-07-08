@@ -224,8 +224,6 @@ if uploaded_file:
                     for (cluster_id, cluster_name), coherence in zip(cluster_names.items(), cluster_coherences):
                         st.write(f"{cluster_name}: {coherence:.4f}")
 
-                df = apply_custom_clustering_rules(df, clusters)
-
                 result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
                 result_df.columns = ['Cluster', 'Keywords']
 
