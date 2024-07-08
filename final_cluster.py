@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 import chardet
+from detect_delimiter import detect
 import numpy as np
 import plotly.graph_objects as go
 import colorsys
@@ -10,19 +11,21 @@ import torch
 from sklearn.decomposition import PCA
 from langdetect import detect_langs
 from iso639 import languages
-import re
-
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+import time
 
 def generate_colors(num_colors):
     colors = []
     hue_values = np.linspace(0, 1, num_colors, endpoint=False)
     np.random.shuffle(hue_values)
     
-    for hue, lightness, saturation in np.ndindex((50, 60), (90, 100)):
-        rgb = colorsys.hls_to_rgb(hue / 100, lightness / 100, saturation / 100)
+    for hue in hue_values:
+        lightness = (50 + np.random.rand() * 10) / 100.
+        saturation = (90 + np.random.rand() * 10) / 100.
+        rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
         colors.append(tuple(int(x * 255) for x in rgb))
     return colors
-
 
 def calculate_cluster_coherence(embeddings, cluster_labels):
     unique_labels = np.unique(cluster_labels)
@@ -36,13 +39,11 @@ def calculate_cluster_coherence(embeddings, cluster_labels):
             coherences.append(coherence)
     return coherences
 
-
 def detect_encoding(file):
     raw_data = file.read()
     file.seek(0)  # Reset file pointer
     result = chardet.detect(raw_data)
     return result['encoding']
-
 
 def detect_language(text):
     try:
@@ -53,67 +54,33 @@ def detect_language(text):
     except:
         return 'Unknown Language'
 
+def geocode_keyword(geolocator, keyword):
+    try:
+        location = geolocator.geocode(keyword)
+        if location:
+            return location.latitude, location.longitude
+        else:
+            return None, None
+    except (GeocoderTimedOut, GeocoderUnavailable):
+        time.sleep(1)
+        return geocode_keyword(geolocator, keyword)
 
-def extract_location(text):
-    specific_locations = ["delhi", "gurgaon", "pune"]
-    other_locations = ["chennai", "patna", "kannur", "kerala", "trivandrum",
-                       "bangalore", "india", "faridabad",
-                       "jaipur", "noida", "meerut", "greater noida", "jammu",
-                       "kolkata", "mumbai", "dwarka", "gurugram"]
-    for location in specific_locations + other_locations:
-        if re.search(r'\b' + re.escape(location) + r'\b', text, re.IGNORECASE):
-            return location
-    return None
-
-
-def cluster_keywords(keywords, method, model_name, additional_params):
-    model = SentenceTransformer(model_name)
-    embeddings = model.encode(keywords, convert_to_tensor=True)
-
-    if method == "Community Detection":
-        import networkx as nx
-        from community import community_louvain
-
-        # Calculate cosine similarities and create a graph
-        cosine_scores = util.pytorch_cos_sim(embeddings, embeddings)
-        edges = [(i, j, float(cosine_scores[i][j])) for i in range(len(keywords)) for j in range(i + 1, len(keywords))]
-        G = nx.Graph()
-        G.add_weighted_edges_from(edges)
-
-        # Apply community detection algorithm
-        partition = community_louvain.best_partition(G, resolution=additional_params['resolution'])
-        clusters = [partition[i] for i in range(len(keywords))]
-
-    elif method == "Agglomerative":
-        clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=additional_params['distance_threshold'])
-        clusters = clustering_model.fit_predict(embeddings.cpu())
-
-    elif method == "K-means":
-        clustering_model = KMeans(n_clusters=additional_params['n_clusters'], random_state=0)
-        clusters = clustering_model.fit_predict(embeddings.cpu())
-
-    return clusters, embeddings
-
-
-st.title("Semantic Keyword Clustering Tool")
+st.title("Semantic Keyword Clustering Tool with Geography Awareness")
 st.write("Upload a CSV or XLSX file containing keywords for clustering.")
 
 clustering_method = st.sidebar.selectbox(
     "Select Clustering Method",
     ["Community Detection", "Agglomerative", "K-means"],
-    help="**Community Detection:** Finds natural groups in your data.\n\nWhen to use: If you're unsure about the number of groups you need.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\nWhen to use: If you want control over the size of the groups by adjusting the threshold.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity.\n\nWhen to use: If you already know how many groups you want."
+    help="**Community Detection:** Finds natural groups in your data.\n\n**Agglomerative:** Groups keywords based on their similarity, step by step.\n\n**K-means:** Creates a fixed number of groups based on keyword similarity."
 )
 
 if clustering_method == "Community Detection":
     cluster_accuracy = st.slider("Cluster Accuracy (0-100)", 0, 100, 91) / 100
     min_cluster_size = st.number_input("Minimum Cluster Size", min_value=1, max_value=100, value=3)
-    additional_params = {'resolution': cluster_accuracy}
 elif clustering_method == "Agglomerative":
     distance_threshold = st.sidebar.number_input("Distance Threshold for Agglomerative Clustering", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
-    additional_params = {'distance_threshold': distance_threshold}
 elif clustering_method == "K-means":
     n_clusters = st.number_input("Number of Clusters for K-means", min_value=2, max_value=50000, value=50)
-    additional_params = {'n_clusters': n_clusters}
 
 transformer = st.selectbox(
     "Select Transformer Model",
@@ -134,65 +101,174 @@ if uploaded_file:
         st.write("File loaded successfully!")
         st.write(f"Detected encoding: '{encoding}'")
 
-        # Extracting keywords from the CSV/XLSX file
-        keywords_column = st.selectbox("Select column with Keywords", df.columns)
-        keywords = df[keywords_column].tolist()
+        df.rename(columns={"Search term": "Keyword", "keyword": "Keyword", "query": "Keyword", "Top queries": "Keyword", "queries": "Keyword", "Keywords": "Keyword", "keywords": "Keyword", "Search terms report": "Keyword"}, inplace=True)
 
-        # Process specific locations (Delhi, Gurgaon, Pune) separately
-        specific_keywords = [kw for kw in keywords if extract_location(kw) in ["delhi", "gurgaon", "pune"]]
-        other_keywords = [kw for kw in keywords if extract_location(kw) not in ["delhi", "gurgaon", "pune"]]
+        if "Keyword" not in df.columns:
+            st.error("Error! Please make sure your CSV or XLSX file contains a column named 'Keyword'!")
+        else:
+            st.write(f"Total rows: {len(df)}")
+            st.write(f"Number of unique keywords: {df['Keyword'].nunique()}")
+            
+            df['Keyword'] = df['Keyword'].astype(str)
+            
+            st.write("Sample of the data (first 5 rows):")
+            st.write(df['Keyword'].head())
 
-        # Cluster specific location keywords
-        if specific_keywords:
-            specific_clusters, specific_embeddings = cluster_keywords(specific_keywords, clustering_method, transformer, additional_params)
+            sample_keywords = df['Keyword'].sample(min(100, len(df))).tolist()
+            detected_languages = [detect_language(keyword) for keyword in sample_keywords]
+            main_language = max(set(detected_languages), key=detected_languages.count)
 
-        # Cluster other keywords
-        if other_keywords:
-            other_clusters, other_embeddings = cluster_keywords(other_keywords, clustering_method, transformer, additional_params)
+            st.write(f"Detected main language: {main_language}")
+            st.write("Other detected languages: " + ', '.join(set(detected_languages) - {main_language, 'unknown'}))
 
-        # Combine results
-        combined_keywords = specific_keywords + other_keywords
-        combined_clusters = np.concatenate((specific_clusters, other_clusters))
+            # Geocode keywords
+            geolocator = Nominatim(user_agent="keyword_clustering_app")
+            df['Latitude'], df['Longitude'] = zip(*df['Keyword'].apply(lambda x: geocode_keyword(geolocator, x)))
 
-        # Calculate cluster coherence
-        combined_embeddings = torch.cat((specific_embeddings, other_embeddings), dim=0)
-        coherences = calculate_cluster_coherence(combined_embeddings, combined_clusters)
+            model = SentenceTransformer(transformer)
+            corpus_set = set(df['Keyword'])
+            corpus_set_all = corpus_set
+            cluster_name_list = []
+            corpus_sentences_list = []
+            df_all = []
+            cluster = True
+            iterations = 0
 
-        st.write(f"Number of clusters: {len(set(combined_clusters))}")
-        st.write(f"Average cluster coherence: {np.mean(coherences):.4f}")
+            while cluster:
+                corpus_sentences = list(corpus_set)
+                check_len = len(corpus_sentences)
 
-        # Create a dataframe with the results
-        result_df = pd.DataFrame({'Keyword': combined_keywords, 'Cluster': combined_clusters})
+                if len(corpus_sentences) == 0:
+                    break
 
-        # Visualize the clusters
-        pca = PCA(n_components=2)
-        reduced_embeddings = pca.fit_transform(combined_embeddings.cpu().numpy())
-        result_df['x'] = reduced_embeddings[:, 0]
-        result_df['y'] = reduced_embeddings[:, 1]
+                corpus_embeddings = model.encode(corpus_sentences, batch_size=256, show_progress_bar=True, convert_to_tensor=True)
+                
+                # Add geographical information to embeddings
+                geo_data = df[df['Keyword'].isin(corpus_sentences)][['Latitude', 'Longitude']].values
+                geo_data = np.nan_to_num(geo_data)  # Replace NaN with 0
+                geo_weight = 0.5  # Adjust this weight to control the influence of geographical data
+                combined_embeddings = np.hstack([corpus_embeddings.cpu().numpy(), geo_weight * geo_data])
+                
+                if clustering_method == "Community Detection":
+                    clusters = util.community_detection(torch.tensor(combined_embeddings), min_community_size=min_cluster_size, threshold=cluster_accuracy)
+                    cluster_labels = np.array([i for i, cluster in enumerate(clusters) for _ in cluster])
+                elif clustering_method == "Agglomerative":
+                    clustering_model = AgglomerativeClustering(n_clusters=None, distance_threshold=distance_threshold)
+                    cluster_labels = clustering_model.fit_predict(combined_embeddings)
+                elif clustering_method == "K-means":
+                    clustering_model = KMeans(n_clusters=n_clusters)
+                    cluster_labels = clustering_model.fit_predict(combined_embeddings)
 
-        fig = go.Figure()
-        colors = generate_colors(len(set(combined_clusters)))
-        for cluster_id in set(combined_clusters):
-            cluster_data = result_df[result_df['Cluster'] == cluster_id]
-            fig.add_trace(go.Scatter(
-                x=cluster_data['x'],
-                y=cluster_data['y'],
-                mode='markers',
-                marker=dict(color='rgba' + str(colors[cluster_id]), size=10, line=dict(width=2, color='DarkSlateGrey')),
-                text=cluster_data['Keyword'],
-                name=f'Cluster {cluster_id}'
-            ))
+                for sentence_id, cluster_id in enumerate(cluster_labels):
+                    corpus_sentences_list.append(corpus_sentences[sentence_id])
+                    cluster_name_list.append(f"Cluster {cluster_id + 1}")
 
-        fig.update_layout(title='Keyword Clusters', xaxis_title='PCA Component 1', yaxis_title='PCA Component 2')
-        st.plotly_chart(fig)
+                df_new = pd.DataFrame({'Cluster Name': cluster_name_list, 'Keyword': corpus_sentences_list})
 
-        # Option to download the clustered keywords
-        st.download_button(
-            label="Download Clustered Keywords",
-            data=result_df.to_csv(index=False),
-            file_name='clustered_keywords.csv',
-            mime='text/csv'
-        )
+                df_all.append(df_new)
+                have = set(df_new["Keyword"])
 
+                corpus_set = corpus_set_all - have
+                remaining = len(corpus_set)
+                iterations += 1
+                if check_len == remaining:
+                    break
+
+            if len(df_all) == 0:
+                st.error("No clusters were formed. Please check your data or adjust the clustering parameters.")
+            else:
+                df_new = pd.concat(df_all)
+                df = df.merge(df_new.drop_duplicates('Keyword'), how='left', on="Keyword")
+
+                df['Cluster Name'] = df['Cluster Name'].fillna("no_cluster")
+
+                df['Length'] = df['Keyword'].astype(str).map(len)
+                df = df.sort_values(by="Length", ascending=True)
+                df['Cluster Name'] = df.groupby('Cluster Name')['Keyword'].transform('first')
+                df.sort_values(['Cluster Name', "Keyword"], ascending=[True, True], inplace=True)
+                df = df.drop('Length', axis=1)
+
+                df = df[['Cluster Name', 'Keyword', 'Latitude', 'Longitude']]
+
+                df.sort_values(["Cluster Name", "Keyword"], ascending=[True, True], inplace=True)
+
+                uncluster_percent = (remaining / len(df)) * 100
+                clustered_percent = 100 - uncluster_percent
+                st.write(f"{clustered_percent:.2f}% of rows clustered successfully!")
+                st.write(f"Number of iterations: {iterations}")
+                st.write(f"Total unclustered keywords: {remaining}")
+
+                st.write(f"Number of clusters: {len(df['Cluster Name'].unique())}")
+
+                result_df = df.groupby('Cluster Name')['Keyword'].apply(', '.join).reset_index()
+                result_df.columns = ['Cluster', 'Keywords']
+
+                st.write(result_df)
+
+                # 3D visualization
+                embeddings = model.encode(df['Keyword'].tolist(), batch_size=256, show_progress_bar=True)
+                geo_data = df[['Latitude', 'Longitude']].values
+                geo_data = np.nan_to_num(geo_data)  # Replace NaN with 0
+                combined_data = np.hstack([embeddings, geo_weight * geo_data])
+
+                pca = PCA(n_components=3)
+                embeddings_3d = pca.fit_transform(combined_data)
+
+                fig_3d = go.Figure(data=[go.Scatter3d(
+                    x=embeddings_3d[:, 0],
+                    y=embeddings_3d[:, 1],
+                    z=embeddings_3d[:, 2],
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color=df['Cluster Name'].astype('category').cat.codes,
+                        colorscale='Viridis',
+                        opacity=0.8
+                    ),
+                    text=df['Keyword'],
+                    hoverinfo='text'
+                )])
+
+                fig_3d.update_layout(
+                    width=1200,
+                    height=675,
+                    title='Keyword Embeddings in 3D Space (with Geographical Context)',
+                    scene=dict(
+                        xaxis_title='Dimension 1',
+                        yaxis_title='Dimension 2',
+                        zaxis_title='Dimension 3'
+                    ),
+                    margin=dict(l=0, r=0, b=0, t=40)
+                )
+
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+                csv_data_clustered = result_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Clustered Keywords",
+                    data=csv_data_clustered,
+                    file_name="Clustered_Keywords.csv",
+                    mime="text/csv"
+                )
+
+                if remaining > 0:
+                    st.write("Unclustered Keywords:")
+                    st.write(list(corpus_set))
+                    
+                    unclustered_df = pd.DataFrame(list(corpus_set), columns=['Unclustered Keyword'])
+                    
+                    csv_data_unclustered = unclustered_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Unclustered Keywords",
+                        data=csv_data_unclustered,
+                        file_name="Unclustered_Keywords.csv",
+                        mime="text/csv"
+                    )
+
+                st.write("Note: This tool now incorporates geographical context for improved clustering of location-based keywords.")
+
+    except pd.errors.EmptyDataError:
+        st.error("EmptyDataError: No columns to parse from file. Please upload a valid CSV or XLSX file.")
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"An unexpected error occurred: {e}")
+        st.error("Please check your data and try again.")
